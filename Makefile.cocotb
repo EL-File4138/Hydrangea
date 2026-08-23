@@ -1,0 +1,22 @@
+# Makefile.cocotb
+#
+# Normally invoked indirectly through the repository-level Makefile.
+
+TOPLEVEL_LANG := verilog
+
+TOPLEVEL := $(TOP)
+
+VERILOG_SOURCES := $(RTL_SRCS)
+
+COCOTB_TEST_MODULES := $(COCOTB_TEST_MODULE)
+
+COMPILE_ARGS += -Wall
+
+ifeq ($(SIM),verilator)
+	COMPILE_ARGS += $(VERILATOR_FLAGS)
+	COMPILE_ARGS += --trace
+endif
+
+export PYTHONPATH := $(TB_DIR)/cocotb:$(PYTHONPATH)
+
+include $(shell cocotb-config --makefiles)/Makefile.sim

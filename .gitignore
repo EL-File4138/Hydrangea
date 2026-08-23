@@ -1,0 +1,21 @@
+# Generated Python state
+__pycache__/
+*.py[cod]
+
+# Local code-intelligence state
+.codegraph/
+
+# Makefile build and simulation output
+/build/
+/simulation_wave/
+*.vcd
+*.fst
+
+# Formal-tool work directories
+/formal_verification/*/
+
+# Vivado-generated state and logs
+.Xil/
+*.jou
+*.log
+*.str
