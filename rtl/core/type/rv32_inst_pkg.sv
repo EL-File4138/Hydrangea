@@ -62,16 +62,34 @@ package rv32_inst_pkg;
   } ctrl_op_t;
   // op == 99: B, op == 103: I, op == 111: J;
 
-  typedef enum logic [1:0] {
-    ALU,
-    LSU,
-    CTRL,
-    IMM
+  typedef enum logic [2:0] {  // funct3
+    CSR_SYS = 3'b000,
+    CSR_RW  = 3'b001,
+    CSR_RS  = 3'b010,
+    CSR_RC  = 3'b011,
+    CSR_RWI = 3'b101,
+    CSR_RSI = 3'b110,
+    CSR_RCI = 3'b111
+  } csr_op_t;
+  // op == 115: I
+  // Immediate (rs1 reinterpret) extract [2]
+
+  typedef enum logic [2:0] {
+    WB_ALU,
+    WB_LSU,
+    WB_CTRL,
+    WB_IMM,
+    WB_CSR
   } wb_src_t;
 
-  typedef struct packed {
-    logic legal;
+  typedef enum logic [1:0] {
+    PC_SEQ,
+    PC_CTRL,
+    PC_CSR,
+    PC_TRAP
+  } pc_src_t;
 
+  typedef struct packed {
     logic [4:0] rs1;
     logic [4:0] rs2;
     logic [4:0] rd;
@@ -85,8 +103,12 @@ package rv32_inst_pkg;
     alu_op_t  alu_op;
     ctrl_op_t ctrl_op;
     lsu_op_t  lsu_op;
+    csr_op_t  csr_op;
+
+    logic [4:0] csr_uimm;
 
     wb_src_t wb_src;
+    pc_src_t pc_src;
   } inst_sem_t;
 
 endpackage : rv32_inst_pkg

@@ -7,5 +7,6 @@ rtl/core/reg/rv32_regfile.sv
 rtl/core/rv32_core.sv
 rtl/core/type/rv32_inst_pkg.sv
 rtl/core/type/rv32_mem_if.sv
+rtl/core/type/rv32_trap_pkg.sv
 rtl/mem/rv32_shared_sync_ram_adapter.sv
 rtl/mem/sync_ram.sv
