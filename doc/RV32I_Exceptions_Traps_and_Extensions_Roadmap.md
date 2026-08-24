@@ -2,9 +2,13 @@
 
 **Status:** Architecture planning
 
-**Governing contract:** [RV32I Core Design Contract](RV32I_Core_Design_Contract.md)
+**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
 
-**Related plans:** [Controller and Datapath](RV32I_Core_Controller_and_Datapath_Plan.md) and [LSU Implementation](RV32I_LSU_Implementation_Plan.md)
+**Memory contract:** [RV32I Memory Subsystem Design Contract](RV32I_Memory_Subsystem_Design_Contract.md)
+
+**LSU contract:** [RV32I LSU Design Contract](RV32I_LSU_Contract.md)
+
+**Core implementation:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
 
 ## 1. Purpose
 
@@ -18,7 +22,7 @@ The following base-ISA behavior requires architecture beyond arithmetic, load/st
 
 | Work item | Required design outcome | Completion evidence |
 | --- | --- | --- |
-| `FENCE` | Defined ordering behavior for the selected memory system and a rule for draining relevant transactions | Litmus or directed ordering tests and controller assertions |
+| `FENCE` | Defined ordering behavior for the selected memory system and a rule for draining relevant transactions | Litmus or directed ordering tests and core assertions |
 | `ECALL` | Defined execution-environment request or precise trap destination | Faulting-PC/cause test with no earlier or later side-effect ambiguity |
 | `EBREAK` | Defined breakpoint response through the execution environment, trap path, or later debug architecture | Precise breakpoint test and documented resume/termination behavior |
 
@@ -28,7 +32,7 @@ For a single-issue core with no speculative or outstanding accesses, `FENCE` may
 
 ### 3.1 Required event boundary
 
-The core requires one unambiguous event path from the detecting unit to the controller or trap subsystem. The event representation is expected to carry, as applicable:
+The core requires one unambiguous event path from the detecting unit to the core FSM or trap subsystem. The event representation is expected to carry, as applicable:
 
 - event validity and cause;
 - the PC of the faulting instruction;
@@ -50,7 +54,7 @@ The architecture shall define behavior for:
 - breakpoints; and
 - reset or cancellation while an instruction or memory request is in progress.
 
-Static instruction support remains a decoder responsibility. Dynamic event detection remains with the unit that has the required runtime information.
+Static instruction support remains a decoder responsibility. Dynamic event detection remains with the unit that has the required runtime information: data alignment belongs to the LSU, while physical range, routing, and device-access failures belong to the memory adapter.
 
 ### 3.3 Precision rule
 
@@ -64,7 +68,7 @@ Define how the baseline system reports termination and exceptional events. Optio
 
 ### Stage 2: Precise synchronous exceptions
 
-Add the event boundary and implement illegal-instruction, alignment, and exposed memory-fault behavior. Verify that the controller suppresses register writeback, PC redirection, and unaccepted memory side effects for the faulting instruction.
+Add the event boundary and implement illegal-instruction, alignment, and exposed memory-fault behavior. Verify that the core suppresses register writeback, PC redirection, and unaccepted memory side effects for the faulting instruction.
 
 ### Stage 3: Base-ISA completion
 
@@ -93,14 +97,14 @@ The following work is independent of base-RV32I completion and shall receive sep
 - pipelining, hazards, speculation, or multiple outstanding transactions; and
 - board- or SoC-specific debug and interrupt integration.
 
-Adding one of these features may require revision of the core design contract when it changes an existing semantic or ownership boundary.
+Adding one of these features may require revision of the core architecture when it changes an existing semantic or ownership boundary.
 
 ## 6. Decisions Requiring an Architecture Record
 
 | Decision | Why it must be explicit |
 | --- | --- |
 | Target execution environment | Determines whether exceptions terminate, signal a host, or enter a trap handler |
-| Misaligned data-access policy | Changes LSU behavior, memory traffic, and exception guarantees |
+| Misaligned data-error handling | Defines the architectural response to LSU-reported alignment failures |
 | Memory-fault model | Determines whether access failures can occur and where they are reported |
 | Trap entry and return state | Defines architectural PC/state updates and required CSRs |
 | Accepted-store behavior on exception/reset | Required to preserve precise side-effect semantics |
@@ -116,7 +120,7 @@ An architecture item is complete only when:
 
 - the integrated core advertises only encodings with a complete execution path;
 - directed tests cover the normal and exceptional outcomes;
-- assertions enforce precise side effects at the controller boundary;
+- assertions enforce precise side effects at the core boundary;
 - software-visible behavior is documented for the selected execution environment; and
 - advertised ISA, privilege, interrupt, and debug claims match executable regression evidence.
 
