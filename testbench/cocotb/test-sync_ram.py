@@ -2,7 +2,14 @@ import random
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import FallingEdge, ReadOnly, RisingEdge
+from cocotb.triggers import FallingEdge, ReadOnly, RisingEdge, Timer
+
+
+async def reset_dut(dut):
+    dut.rst_ni.value = 0
+    await Timer(1, "ns")
+    dut.rst_ni.value = 1
+    await Timer(1, "ns")
 
 
 @cocotb.test()
@@ -10,12 +17,11 @@ async def rw_cycle(dut):
     """Test read/write cycle of the sync RAM"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(2200):
         # Generate random values for write
-        write_addr = (
-            random.randint(0, 2**30 - 1) << 2
-        )  # Register addresses 0-31 (word-aligned)
+        write_addr = random.randint(0, 255) << 2
         write_data = random.randint(0, 2**32 - 1)
 
         await FallingEdge(dut.clk_i)
@@ -54,6 +60,7 @@ async def random_rw_cycle(dut):
     """Test non-sequenced read/write cycle of the sync RAM"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(440):
         # Maintain a 5 entry list of previous writes to check against reads
@@ -123,6 +130,7 @@ async def data_patterns(dut):
     """Test read/write cycle of the sync RAM with specific data patterns"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     # Define specific data patterns to test
     data_patterns = [
@@ -135,9 +143,7 @@ async def data_patterns(dut):
     ]
 
     for write_data in data_patterns:
-        write_addr = (
-            random.randint(0, 2**30 - 1) << 2
-        )  # Register addresses 0-31 (word-aligned)
+        write_addr = random.randint(0, 255) << 2
 
         await FallingEdge(dut.clk_i)
 
@@ -175,6 +181,7 @@ async def sequential_write(dut):
     """Test sequential write of the sync RAM"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(32):
         write_addr = i << 2  # Word-aligned addresses
@@ -206,6 +213,15 @@ async def sequential_read(dut):
     """Test sequential read of the sync RAM"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
+
+    for i in range(32):
+        await FallingEdge(dut.clk_i)
+        dut.addr_i.value = i << 2
+        dut.write_data_i.value = 0xFFFFFFFF - i
+        dut.write_type_i.value = 0b10
+        dut.write_enable_i.value = 1
+        await RisingEdge(dut.clk_i)
 
     for i in range(32):
         read_addr = i << 2  # Word-aligned addresses
@@ -243,10 +259,11 @@ async def byte_rw(dut):
     """Test read/write cycle of the sync RAM with byte writes"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(2200):
         # Generate random values for write
-        write_addr = random.randint(0, 2**32 - 1)  # Register addresses (byte-aligned)
+        write_addr = random.randint(0, 1023)
         write_data = random.randint(0, 2**8 - 1)
 
         await FallingEdge(dut.clk_i)
@@ -288,10 +305,11 @@ async def halfword_rw(dut):
     """Test read/write cycle of the sync RAM with halfword writes"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(2200):
         # Generate random values for write
-        write_addr = random.randint(0, 2**31 - 1) << 1  # Register addresses (halfword-aligned)
+        write_addr = random.randint(0, 511) << 1
         write_data = random.randint(0, 2**16 - 1)
 
         await FallingEdge(dut.clk_i)
@@ -333,12 +351,11 @@ async def concurrent_rw_cycle(dut):
     """Test concurrent read/write cycle of the sync RAM"""
     clock = Clock(dut.clk_i, 1, "ns")
     cocotb.start_soon(clock.start())
+    await reset_dut(dut)
 
     for i in range(2200):
         # Generate random values for write
-        write_addr = (
-            random.randint(0, 2**30 - 1) << 2
-        )  # Register addresses 0-31 (word-aligned)
+        write_addr = random.randint(0, 255) << 2
         write_data = random.randint(0, 2**32 - 1)
 
         await FallingEdge(dut.clk_i)
@@ -384,3 +401,26 @@ async def concurrent_rw_cycle(dut):
         assert dut.read_data_o.value.to_unsigned() == write_data, (
             f"Concurrent Read/Write cycle failed: {dut.read_data_o.value.to_unsigned()} != {write_data}"
         )
+
+
+@cocotb.test()
+async def asynchronous_reset_clears_memory(dut):
+    """Assert rst_ni between clock edges and verify a prior RAM write is erased."""
+    clock = Clock(dut.clk_i, 1, "ns")
+    cocotb.start_soon(clock.start())
+    await reset_dut(dut)
+
+    await FallingEdge(dut.clk_i)
+    dut.addr_i.value = 0
+    dut.write_data_i.value = 0xDEADBEEF
+    dut.write_type_i.value = 0b10
+    dut.write_enable_i.value = 1
+    await RisingEdge(dut.clk_i)
+
+    dut.rst_ni.value = 0
+    await Timer(1, "ns")
+    dut.rst_ni.value = 1
+    dut.write_enable_i.value = 0
+    await RisingEdge(dut.clk_i)
+    await ReadOnly()
+    assert dut.read_data_o.value.to_unsigned() == 0

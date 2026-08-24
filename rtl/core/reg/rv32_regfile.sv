@@ -2,6 +2,7 @@
 
 module rv32_regfile (
     input logic clk_i,
+    input logic rst_ni,
     input logic write_enable_i,
 
     input logic [4:0] read_addr_a_i,
@@ -15,9 +16,11 @@ module rv32_regfile (
 );
   logic [31:0] reg_cell[32];
 
-  always_ff @(posedge clk_i)
+  always_ff @(posedge clk_i or negedge rst_ni)
     begin
-      if (write_enable_i)
+      if (!rst_ni) begin
+        reg_cell <= '{default: '0};
+      end else if (write_enable_i)
         begin
           reg_cell[write_addr_i] <= write_data_i;
         end

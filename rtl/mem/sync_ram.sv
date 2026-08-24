@@ -5,6 +5,7 @@ module sync_ram #(
     parameter int unsigned AddrWidth = 8
 ) (
     input logic clk_i,
+    input logic rst_ni,
     input logic write_enable_i,
 
     input logic [31:0] addr_i,
@@ -24,8 +25,10 @@ module sync_ram #(
 
   logic [31:0] mem_cell[(2**AddrWidth)-1];
 
-  always_ff @(posedge clk_i) begin
-    if (write_enable_i) begin
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      mem_cell <= '{default: '0};
+    end else if (write_enable_i) begin
       unique case (write_type_i)
         rv32_inst_pkg::BYTE: mem_cell[word_addr][8*addr_i[1:0]+:8] <= write_data_i[7:0];
         rv32_inst_pkg::HALF: mem_cell[word_addr][16*addr_i[1:0]+:16] <= write_data_i[15:0];

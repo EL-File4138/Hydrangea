@@ -5,18 +5,25 @@ from cocotb.clock import Clock
 from cocotb.triggers import Timer
 
 
+async def reset_dut(dut):
+    dut.rst_ni.value = 0
+    await Timer(1, "ns")
+    dut.rst_ni.value = 1
+    await Timer(1, "ns")
+
+
 @cocotb.test()
 async def rw_cycle(dut):
     """Test read/write cycle of the register file"""
+    clock = Clock(dut.clk_i, 1, "ns")
+    cocotb.start_soon(clock.start())
+    await reset_dut(dut)
     for i in range(2200):
         # Generate random values for write
         write_addr_a = random.randint(1, 31)  # Register addresses 1-31
         write_data_a = random.randint(0, 2**32 - 1)
         write_addr_b = random.choice([addr for addr in range(1, 32) if addr != write_addr_a]) # Register addresses 1-31 excluding write_addr_a
         write_data_b = random.randint(0, 2**32 - 1)
-
-        clock = Clock(dut.clk_i, 1, "ns")
-        cocotb.start_soon(clock.start())
 
         for write_addr, write_data in [
             (write_addr_a, write_data_a),
@@ -63,15 +70,15 @@ async def rw_cycle(dut):
 @cocotb.test()
 async def concurrent_read(dut):
     """Test concurrent read of the register file"""
+    clock = Clock(dut.clk_i, 1, "ns")
+    cocotb.start_soon(clock.start())
+    await reset_dut(dut)
     for i in range(100):
         # Generate random values for write
         write_addr_a = random.randint(1, 31)  # Register addresses 1-31
         write_data_a = random.randint(0, 2**32 - 1)
         write_addr_b = random.choice([addr for addr in range(1, 32) if addr != write_addr_a]) # Register addresses 1-31 excluding write_addr_a
         write_data_b = random.randint(0, 2**32 - 1)
-
-        clock = Clock(dut.clk_i, 1, "ns")
-        cocotb.start_soon(clock.start())
 
         for write_addr, write_data in [
             (write_addr_a, write_data_a),
@@ -110,14 +117,14 @@ async def concurrent_read(dut):
 @cocotb.test()
 async def overwrite(dut):
     """Test overwrite of the register file"""
+    clock = Clock(dut.clk_i, 1, "ns")
+    cocotb.start_soon(clock.start())
+    await reset_dut(dut)
     for i in range(100):
         # Generate random values for write
         write_addr = random.randint(1, 31)  # Register addresses 1-31
         write_data_a = random.randint(0, 2**32 - 1)
         write_data_b = random.randint(0, 2**32 - 1)
-
-        clock = Clock(dut.clk_i, 1, "ns")
-        cocotb.start_soon(clock.start())
 
         # First write operation
         dut.write_addr_i.value = write_addr
@@ -154,6 +161,7 @@ async def overwrite(dut):
 @cocotb.test()
 async def zero_read(dut):
     """Test that reading from register 0 always returns 0"""
+    await reset_dut(dut)
     for i in range(100):
         # Set read address to register 0
         dut.read_addr_a_i.value = 0
@@ -169,6 +177,7 @@ async def zero_read(dut):
 @cocotb.test()
 async def zero_write(dut):
     """Test that writing to register 0 has no effect"""
+    await reset_dut(dut)
     for i in range(100):
         # Set write address to register 0
         dut.write_addr_i.value = 0
@@ -195,3 +204,25 @@ async def zero_write(dut):
         assert dut.read_data_a_o.value.to_unsigned() == 0, (
             f"Zero Write failed: {dut.read_data_a_o.value.to_unsigned()} != 0"
         )
+
+
+@cocotb.test()
+async def asynchronous_reset_clears_registers(dut):
+    """Assert rst_ni between clock edges and verify register contents clear immediately."""
+    clock = Clock(dut.clk_i, 1, "ns")
+    cocotb.start_soon(clock.start())
+    await reset_dut(dut)
+
+    dut.write_addr_i.value = 1
+    dut.write_data_i.value = 0xDEADBEEF
+    dut.write_enable_i.value = 1
+    await Timer(1, "ns")
+    dut.write_enable_i.value = 0
+    dut.read_addr_a_i.value = 1
+    await Timer(1, "ns")
+    assert dut.read_data_a_o.value.to_unsigned() == 0xDEADBEEF
+
+    dut.rst_ni.value = 0
+    await Timer(1, "ns")
+    assert dut.read_data_a_o.value.to_unsigned() == 0
+    dut.rst_ni.value = 1
