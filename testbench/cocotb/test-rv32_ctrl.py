@@ -48,7 +48,9 @@ async def drive_ctrl(dut, ctrl_op_i, pc, operand_a, operand_b, imm):
 
 async def assert_branch(dut, ctrl_op_i, pc, operand_a, operand_b, imm):
     actual_pc, _ = await drive_ctrl(dut, ctrl_op_i, pc, operand_a, operand_b, imm)
-    expected_pc = (pc + (imm if branch_taken(ctrl_op_i, operand_a, operand_b) else 4)) & MASK32
+    expected_pc = (
+        pc + (imm if branch_taken(ctrl_op_i, operand_a, operand_b) else 4)
+    ) & MASK32
     assert actual_pc == expected_pc, (
         f"ctrl_op_i={ctrl_op_i:#x}, pc={pc:#010x}, a={operand_a:#010x}, "
         f"b={operand_b:#010x}, imm={imm:#010x}: pc_v_o={actual_pc:#010x}, "
@@ -104,8 +106,14 @@ async def jalr_writes_link_and_clears_target_lsb(dut):
 async def random_control_targets_match_reference(dut):
     """Exercise every CTRL micro-op with randomly generated 32-bit operands."""
     ctrl_op_is = (
-        CTRL_BEQ, CTRL_BNE, CTRL_BLT, CTRL_BGE,
-        CTRL_BLTU, CTRL_BGEU, CTRL_JAL, CTRL_JALR,
+        CTRL_BEQ,
+        CTRL_BNE,
+        CTRL_BLT,
+        CTRL_BGE,
+        CTRL_BLTU,
+        CTRL_BGEU,
+        CTRL_JAL,
+        CTRL_JALR,
     )
     for _ in range(2200):
         ctrl_op_i = random.choice(ctrl_op_is)
@@ -113,7 +121,9 @@ async def random_control_targets_match_reference(dut):
         operand_a = random.getrandbits(32)
         operand_b = random.getrandbits(32)
         imm = random.getrandbits(32)
-        actual_pc, actual_rd = await drive_ctrl(dut, ctrl_op_i, pc, operand_a, operand_b, imm)
+        actual_pc, actual_rd = await drive_ctrl(
+            dut, ctrl_op_i, pc, operand_a, operand_b, imm
+        )
 
         if ctrl_op_i == CTRL_JAL:
             expected_pc = (pc + imm) & MASK32
@@ -122,7 +132,9 @@ async def random_control_targets_match_reference(dut):
             expected_pc = ((operand_a + imm) & ~1) & MASK32
             expected_rd = (pc + 4) & MASK32
         else:
-            expected_pc = (pc + (imm if branch_taken(ctrl_op_i, operand_a, operand_b) else 4)) & MASK32
+            expected_pc = (
+                pc + (imm if branch_taken(ctrl_op_i, operand_a, operand_b) else 4)
+            ) & MASK32
             expected_rd = None
 
         assert actual_pc == expected_pc, (

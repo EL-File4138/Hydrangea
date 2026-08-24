@@ -34,13 +34,15 @@ def logic_evaluator(expression, variables=None):
         for index, label in enumerate(labels)
     ]
     separator = "+-" + "-+-".join("-" * width for width in widths) + "-+"
-    header = "| " + " | ".join(
-        label.center(width) for label, width in zip(labels, widths)
-    ) + " |"
+    header = (
+        "| "
+        + " | ".join(label.center(width) for label, width in zip(labels, widths))
+        + " |"
+    )
     body = [
-        "| " + " | ".join(
-            str(value).center(width) for value, width in zip(row, widths)
-        ) + " |"
+        "| "
+        + " | ".join(str(value).center(width) for value, width in zip(row, widths))
+        + " |"
         for row in rows
     ]
     return "\n".join([separator, header, separator, *body, separator])

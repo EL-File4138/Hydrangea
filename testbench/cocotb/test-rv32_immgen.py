@@ -11,10 +11,13 @@ async def bit_width(dut):
     for _ in range(100):
         dut.inst_i.value = random.randint(0, 2**32 - 1)
         dut.inst_fmt_i.value = random.randint(1, 5)
-        await Timer(1, 'ns')  # Wait for a short time to allow the DUT to process
+        await Timer(1, "ns")  # Wait for a short time to allow the DUT to process
 
         # Check the bit width of the output
-        assert dut.imm_o.value.to_unsigned() < 2**32, f"Output exceeds 32 bits: {dut.imm_o.value}"
+        assert dut.imm_o.value.to_unsigned() < 2**32, (
+            f"Output exceeds 32 bits: {dut.imm_o.value}"
+        )
+
 
 @cocotb.test()
 async def I_type(dut):
@@ -25,13 +28,14 @@ async def I_type(dut):
         dut.inst_fmt_i.value = 1  # I-type format
         await Timer(1, "ns")
 
-        expected_output = ((inst >> 20) & 0xFFF)
+        expected_output = (inst >> 20) & 0xFFF
         if expected_output & 0x800:
             expected_output |= 0xFFFFF000
 
         assert dut.imm_o.value.to_unsigned() == expected_output, (
             f"I-type immediate mismatch: {dut.imm_o.value.to_unsigned():#010x} != {expected_output:#010x}"
         )
+
 
 @cocotb.test()
 async def S_type(dut):

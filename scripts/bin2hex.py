@@ -19,7 +19,7 @@ def main() -> int:
 
     with args.output.open("w", encoding="ascii") as f:
         for offset in range(0, len(data), 4):
-            word = int.from_bytes(data[offset:offset + 4], byteorder="little")
+            word = int.from_bytes(data[offset : offset + 4], byteorder="little")
             f.write(f"{word:08x}\n")
 
     return 0

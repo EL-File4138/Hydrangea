@@ -22,7 +22,9 @@ async def rw_cycle(dut):
         # Generate random values for write
         write_addr_a = random.randint(1, 31)  # Register addresses 1-31
         write_data_a = random.randint(0, 2**32 - 1)
-        write_addr_b = random.choice([addr for addr in range(1, 32) if addr != write_addr_a]) # Register addresses 1-31 excluding write_addr_a
+        write_addr_b = random.choice(
+            [addr for addr in range(1, 32) if addr != write_addr_a]
+        )  # Register addresses 1-31 excluding write_addr_a
         write_data_b = random.randint(0, 2**32 - 1)
 
         for write_addr, write_data in [
@@ -77,7 +79,9 @@ async def concurrent_read(dut):
         # Generate random values for write
         write_addr_a = random.randint(1, 31)  # Register addresses 1-31
         write_data_a = random.randint(0, 2**32 - 1)
-        write_addr_b = random.choice([addr for addr in range(1, 32) if addr != write_addr_a]) # Register addresses 1-31 excluding write_addr_a
+        write_addr_b = random.choice(
+            [addr for addr in range(1, 32) if addr != write_addr_a]
+        )  # Register addresses 1-31 excluding write_addr_a
         write_data_b = random.randint(0, 2**32 - 1)
 
         for write_addr, write_data in [
@@ -113,6 +117,7 @@ async def concurrent_read(dut):
         assert dut.read_data_b_o.value.to_unsigned() == write_data_b, (
             f"Concurrent Read failed: {dut.read_data_b_o.value.to_unsigned()} != {write_data_b}"
         )
+
 
 @cocotb.test()
 async def overwrite(dut):
@@ -158,6 +163,7 @@ async def overwrite(dut):
             f"Same Port Overwrite failed: {dut.read_data_a_o.value.to_unsigned()} != {write_data_b}"
         )
 
+
 @cocotb.test()
 async def zero_read(dut):
     """Test that reading from register 0 always returns 0"""
@@ -173,6 +179,7 @@ async def zero_read(dut):
         assert dut.read_data_a_o.value.to_unsigned() == 0, (
             f"Zero Read failed: {dut.read_data_a_o.value.to_unsigned()} != 0"
         )
+
 
 @cocotb.test()
 async def zero_write(dut):

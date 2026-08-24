@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+ruff format --check .
 make update-files
 make lint
 make clean

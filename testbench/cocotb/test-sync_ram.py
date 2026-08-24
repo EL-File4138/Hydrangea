@@ -300,6 +300,7 @@ async def byte_rw(dut):
             f"Read/Write cycle failed: {read_byte} != {write_data}"
         )
 
+
 @cocotb.test()
 async def halfword_rw(dut):
     """Test read/write cycle of the sync RAM with halfword writes"""
@@ -341,10 +342,13 @@ async def halfword_rw(dut):
         halfword_index = write_addr % 2
 
         # Check if the read halfword matches the written halfword
-        read_halfword = (dut.read_data_o.value.to_unsigned() >> (halfword_index * 16)) & 0xFFFF
+        read_halfword = (
+            dut.read_data_o.value.to_unsigned() >> (halfword_index * 16)
+        ) & 0xFFFF
         assert read_halfword == write_data, (
             f"Read/Write cycle failed: {read_halfword} != {write_data}"
         )
+
 
 @cocotb.test()
 async def concurrent_rw_cycle(dut):
