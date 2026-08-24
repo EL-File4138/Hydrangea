@@ -28,6 +28,8 @@ The LSU shall provide the processor-side behavior needed to execute a decoded lo
 
 The effective address is the architectural base-register value plus the decoded immediate. This requirement does not decide whether the addition is performed inside the LSU or by a shared ALU.
 
+The Core Controller, including its datapath, shall perform all register-file access. The LSU shall receive the base-register and store-source contents as raw 32-bit values and shall return a raw 32-bit load result. It shall not consume source or destination register indices or authorize register-file writeback.
+
 ## 3. Memory Abstraction
 
 The LSU input represents an ISA-level operation. The memory-facing request shall contain only generic transaction information, such as address, read/write direction, transfer width or byte enables, and write data.
@@ -50,7 +52,7 @@ Instruction fetch is not an LSU operation. A unified memory implementation requi
 
 ### 4.2 Store
 
-1. Accept one legal store operation, its address operands, and source data.
+1. Accept one legal store operation, its base-register value, decoded immediate, and source-data value.
 2. Determine the effective address and transfer width.
 3. Apply the selected alignment policy.
 4. Adapt the source data and lane information to the memory-interface convention.

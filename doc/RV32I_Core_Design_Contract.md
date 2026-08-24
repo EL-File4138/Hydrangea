@@ -56,7 +56,21 @@ Downstream units shall not reconstruct an immediate from the raw instruction. Fo
 
 ## 4. Execution-Unit Boundary
 
+### 4.1 Semantic operations
+
 ALU, load/store, and control-transfer requests shall use typed semantic operations. Numerical encodings and any deliberate correspondence with ISA fields are implementation details owned by `rv32_inst_pkg`.
+
+### 4.2 Operand and result values
+
+`rv32_instdec` emits architectural register indices. The Core Controller, including its datapath, is the sole owner of register-file access: it shall resolve each active source index and route the resulting 32-bit value to the selected execution unit.
+
+ALU, LSU, and CTRL shall consume register contents as raw 32-bit operand values, not as architectural register indices. They shall not read the register file directly or interpret an operand input as a register identifier.
+
+Architectural result ports from these units shall likewise carry raw 32-bit values. Execution units shall not select a destination register or authorize a register write. The controller shall retain `rd`, apply `rd_write`, select the result source, and perform writeback.
+
+This value-only rule applies to architectural operand and result data. It does not prohibit typed operation selectors or protocol, completion, and fault signals required by a unit's function.
+
+### 4.3 Validity and dynamic checks
 
 For a legal instruction, the decoder is the trust boundary for static encoding validity. An execution unit may assume that a selected semantic operation is valid and shall not be required to validate the original instruction encoding.
 
@@ -66,7 +80,20 @@ This rule does not remove responsibility for dynamic checks such as address alig
 
 Any operation defined relative to the PC shall use the address of the instruction being executed. It shall not depend on whether the fetch PC has already advanced. The controller shall retain or otherwise provide this instruction PC whenever fetch timing makes the live PC ambiguous.
 
-For jump instructions, the control-transfer path has two distinct results: the target updates the PC, while the link value is the control unit's register-writeback result. The target shall not be written to `rd`.
+CTRL shall compute the complete architectural next-PC value for every control-transfer instruction. For a conditional branch, that value shall be the branch target when taken and the executing instruction PC plus four when not taken. The controller shall not apply a second fall-through increment after selecting the CTRL result.
+
+At the architectural next-PC selection point, controller behavior is equivalent to:
+
+```systemverilog
+if (is_ctrl)
+  pc_d = ctrl_pc;
+else
+  pc_d = instruction_pc + 32'd4;
+```
+
+The identifiers are conceptual. `instruction_pc` denotes the PC of the instruction being executed, and `ctrl_pc` denotes CTRL's complete next-PC result. This rule does not prescribe the cycle in which the PC register is written.
+
+For jump instructions, the control-transfer path has two distinct raw results: the next-PC value and the link value. The next-PC value updates the PC, while the link value is eligible for register writeback. The target shall not be written to `rd`.
 
 `AUIPC` shall use the ALU semantic path, with the controller supplying the current instruction PC and the decoded immediate as operands. `LUI` shall use the normalized immediate directly. These choices define operand provenance without prescribing physical muxes or cycle allocation.
 
@@ -94,6 +121,6 @@ The decoder's legality result concerns static decode support only. Trap routing 
 
 ## 9. Conformance and Change Control
 
-Decoder verification shall test the instruction-to-semantic-record mapping independently of controller timing. Integration verification shall check the ownership and validity rules in this contract, especially inactive-field handling, instruction-PC identity, writeback authorization, and the decoder-to-execution trust boundary.
+Decoder verification shall test the instruction-to-semantic-record mapping independently of controller timing. Integration verification shall check the ownership and validity rules in this contract, especially inactive-field handling, value-only execution-unit operands and results, instruction-PC identity, complete CTRL next-PC selection, writeback authorization, and the decoder-to-execution trust boundary.
 
 This document shall be revised when one of these cross-module decisions changes. Changes limited to supported instruction lists, enum values, field widths, ports, or cycle timing shall be made in their authoritative implementation sources and shall require a contract revision only when they alter an abstraction boundary or invariant stated here.
