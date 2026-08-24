@@ -1,127 +1,360 @@
 # RV32I Exceptions, Traps, and Extensions Roadmap
 
-**Status:** Architecture planning
+## Purpose
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+This document defines the staged path from the current RV32I subset to a more complete RISC-V execution environment. It separates the newly contracted synchronous-trap foundation from implementation evidence, base-ISA completion, full machine-mode behavior, interrupts, and optional ISA extensions.
 
-**Memory contract:** [RV32I Memory Subsystem Design Contract](RV32I_Memory_Subsystem_Design_Contract.md)
+## Status
 
-**LSU contract:** [RV32I LSU Design Contract](RV32I_LSU_Contract.md)
+This is a planning and scope-control document. It does not claim support merely because work appears in a milestone. Support claims require RTL and test evidence under the project documentation policy.
 
-**Core implementation:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+The architectural baseline is the RISC-V Unprivileged ISA, version 20240411. Privileged behavior shall cite an explicit privileged-architecture version when that work begins.
 
-## 1. Purpose
+## 1. Stage Order
 
-This document tracks architecture that must be designed before expanding the core's ISA and execution-environment claims. It is not evidence that an instruction or feature is implemented. Decoder RTL and executable tests remain authoritative for current support.
+The recommended order is:
 
-Items shall be removed from this roadmap or marked complete only when their architectural behavior, implementation, and verification evidence all exist.
+1. freeze the execution-environment contract;
+2. implement the contracted synchronous exception, minimum CSR, and trap architecture;
+3. complete and verify required base-RV32I instruction behavior;
+4. complete Zicsr and machine-mode return and privilege behavior;
+5. add machine interrupts;
+6. add optional extensions only when software requirements justify them.
 
-## 2. Base-RV32I Completion Work
+This order avoids adding interrupts or extensions on top of undefined exception and environment behavior.
 
-The following base-ISA behavior requires architecture beyond arithmetic, load/store, and control-transfer execution:
+## 2. Stage 1: Execution-Environment Contract
 
-| Work item | Required design outcome | Completion evidence |
-| --- | --- | --- |
-| `FENCE` | Defined ordering behavior for the selected memory system and a rule for draining relevant transactions | Litmus or directed ordering tests and core assertions |
-| `ECALL` | Defined execution-environment request or precise trap destination | Faulting-PC/cause test with no earlier or later side-effect ambiguity |
-| `EBREAK` | Defined breakpoint response through the execution environment, trap path, or later debug architecture | Precise breakpoint test and documented resume/termination behavior |
+Before trap RTL is added, define the environment in which software runs.
 
-For a single-issue core with no speculative or outstanding accesses, `FENCE` may require little datapath action. It shall nevertheless count as integrated support only after the ordering argument and completion condition are explicit.
+Required decisions:
 
-## 3. Exception Architecture
+- reset vector;
+- instruction and data architectural ranges;
+- RAM, ROM, and MMIO windows;
+- behavior for unmapped addresses;
+- required access widths for each MMIO device;
+- misaligned-access policy;
+- memory-ordering assumptions relevant to FENCE;
+- whether self-modifying code is supported;
+- whether software starts directly in machine mode;
+- required startup ABI assumptions;
+- required host communication, timer, and interrupt devices.
 
-### 3.1 Required event boundary
+This stage is complete when a software image can be linked against a stable memory map and reset contract.
 
-The core requires one unambiguous event path from the detecting unit to the core FSM or trap subsystem. The event representation is expected to carry, as applicable:
+## 3. Stage 2: Synchronous Exceptions and Trap Entry
 
-- event validity and cause;
-- the PC of the faulting instruction;
-- instruction or address context needed by the execution environment;
-- whether a memory transaction has already been accepted; and
-- enough completion information to prevent architectural side effects after the event.
+This stage implements and verifies the synchronous-trap contract before adding broader architectural state.
 
-Signal names and encoded cause values are deferred until the execution environment is selected.
+Minimum exception classes:
 
-### 3.2 Events to address
+- instruction-address misaligned;
+- instruction-access fault;
+- illegal instruction;
+- breakpoint;
+- load-address misaligned;
+- load-access fault;
+- store or AMO address misaligned;
+- store or AMO access fault;
+- environment call from machine mode.
 
-The architecture shall define behavior for:
+The current contract baseline establishes:
 
-- an unsupported or illegal instruction;
-- instruction-address misalignment where the implemented control-transfer rules can produce it;
-- load/store address misalignment under the selected policy;
-- instruction or data access failure if exposed by the memory interface;
-- environment calls;
-- breakpoints; and
-- reset or cancellation while an instruction or memory request is in progress.
+- one `rv32_trap_pkg::trap_req_t` report containing validity, interrupt class, cause code, and `tval`;
+- decentralized detection in the unit with the required semantic knowledge and centralized core qualification, arbitration, retention, and trap entry;
+- decoder-owned illegal-encoding reports with no semantic legality field and with the raw instruction in `tval`;
+- transaction-qualified LSU reports for instruction, load, and store faults;
+- a defensive LSU invalid-uop report using `EXC_ILLEGAL_INST` and zero `tval`;
+- a retained report and explicit core `TRAP` state for precise synchronous entry;
+- minimum machine trap state consisting of `mtvec`, `mepc`, `mcause`, and `mtval`;
+- `mepc` equal to the faulting instruction PC, with no normal GPR, CSR, or PC commit from the trapped instruction;
+- CSR/SYSTEM-owned exact SYSTEM and CSR-access legality reports;
+- decoder-trap precedence followed by qualification of only the selected specialist source;
+- control-target misalignment reported before normal commit; and
+- machine interrupts and full privilege-stack behavior deferred.
 
-Static instruction support remains a decoder responsibility. Dynamic event detection remains with the unit that has the required runtime information: data alignment belongs to the LSU, while physical range, routing, and device-access failures belong to the memory adapter.
+Remaining decisions in this stage include reset values, supported `mtvec` modes, CSR WARL behavior, and any priority needed beyond decoder precedence and the serialized synchronous sources.
 
-### 3.3 Precision rule
+The per-cause `tval` policy for CSR/SYSTEM exceptions remains to be fixed by the execution-environment and privileged-architecture contract. Decoder illegal encodings already use the raw instruction, CTRL target misalignment uses the attempted target, and the defensive LSU invalid-uop path uses zero.
 
-An exception is precise when all older instructions have committed, the faulting instruction has not partially committed an architectural result, and no younger instruction has committed. The baseline one-instruction-at-a-time execution model should simplify this rule but does not replace explicit handling of accepted stores and PC updates.
+Misaligned loads and stores shall complete locally in the LSU with their architectural address-misaligned causes and effective-address `tval`, without issuing a DMEM request. Misaligned multi-transfer emulation remains outside the single-transfer LSU contract.
 
-## 4. Architecture Sequence
+This stage is complete when RTL and tests show that a faulting instruction cannot perform a later normal commit and that control reaches a defined trap target with sufficient metadata for software handling.
 
-### Stage 1: Minimal execution environment
+## 4. Stage 3: Base RV32I Completion
 
-Define how the baseline system reports termination and exceptional events. Options include a testbench-visible stop interface, a platform service request, or a trap entry path. This decision shall precede `ECALL` and `EBREAK` support.
+Complete mandatory or environment-visible base instructions not already implemented.
 
-### Stage 2: Precise synchronous exceptions
+Required instruction outcomes:
 
-Add the event boundary and implement illegal-instruction, alignment, and exposed memory-fault behavior. Verify that the core suppresses register writeback, PC redirection, and unaccepted memory side effects for the faulting instruction.
-
-### Stage 3: Base-ISA completion
-
-Implement and verify `FENCE`, `ECALL`, and `EBREAK` against the selected memory model and execution environment. Only then evaluate whether the integrated core may claim the intended base-RV32I profile.
-
-### Stage 4: Privileged execution and CSRs
-
-If software beyond the minimal execution environment is required, define the privilege level, trap-vector behavior, exception return, architectural CSRs, and the `Zicsr` instruction extension. Privileged state shall remain outside the semantic decoder unless a decode field is genuinely required at the boundary.
-
-### Stage 5: Interrupts and platform sources
-
-Define interrupt priority, sampling, precision, timer/software/external sources, and interaction with memory waits. Interrupt support depends on the privileged/trap state selected in Stage 4.
-
-### Stage 6: Debug architecture
-
-Treat halt, resume, single-step, abstract register access, and breakpoint integration as a separate architecture project. `EBREAK` behavior may later route into debug mode, but base breakpoint handling shall not assume that debug hardware already exists.
-
-## 5. Later ISA and Microarchitecture Projects
-
-The following work is independent of base-RV32I completion and shall receive separate design plans before implementation:
-
-- multiplication and division;
-- compressed instructions and variable-length fetch alignment;
-- atomics and the accompanying memory-ordering requirements;
-- caches, address translation, and protection;
-- pipelining, hazards, speculation, or multiple outstanding transactions; and
-- board- or SoC-specific debug and interrupt integration.
-
-Adding one of these features may require revision of the core architecture when it changes an existing semantic or ownership boundary.
-
-## 6. Decisions Requiring an Architecture Record
-
-| Decision | Why it must be explicit |
+| Instruction | Required behavior |
 | --- | --- |
-| Target execution environment | Determines whether exceptions terminate, signal a host, or enter a trap handler |
-| Misaligned data-error handling | Defines the architectural response to LSU-reported alignment failures |
-| Memory-fault model | Determines whether access failures can occur and where they are reported |
-| Trap entry and return state | Defines architectural PC/state updates and required CSRs |
-| Accepted-store behavior on exception/reset | Required to preserve precise side-effect semantics |
-| `FENCE` completion condition | Defines the core's observable memory-ordering guarantee |
-| Interrupt sampling point | Determines precision around multicycle waits and commit |
-| `EBREAK` destination | Coordinates execution-environment, trap, and debug behavior |
+| FENCE | Legal serialization no-op: no register write, no LSU request, sequential next PC |
+| ECALL | Structurally decoded SYSTEM operation that reports a machine-mode environment-call exception |
+| EBREAK | Structurally decoded SYSTEM operation that reports a breakpoint exception |
+| Unsupported reserved encodings | Illegal-instruction exception |
 
-Each resolved item should be captured in a focused architecture decision record or in the implemented interface's protocol documentation, not left as prose in this roadmap.
+Required work:
 
-## 7. Verification and Support Gates
+- add RTL decode coverage for FENCE and all structurally valid SYSTEM forms;
+- implement exact ECALL, EBREAK, and unsupported-SYSTEM behavior in the CSR/SYSTEM boundary;
+- report unsupported or reserved encodings from the decoder or CSR/SYSTEM boundary that owns the relevant legality decision;
+- verify that FENCE matches the selected serialization-no-op memory model; and
+- add directed tests for each newly legal or trapping encoding.
 
-An architecture item is complete only when:
+This stage is complete when the supported base-ISA statement names no silent omissions.
 
-- the integrated core advertises only encodings with a complete execution path;
-- directed tests cover the normal and exceptional outcomes;
-- assertions enforce precise side effects at the core boundary;
-- software-visible behavior is documented for the selected execution environment; and
-- advertised ISA, privilege, interrupt, and debug claims match executable regression evidence.
+## 5. Stage 4: Complete Zicsr and Machine-Mode Behavior
 
-The RISC-V Unprivileged ISA specification is normative for base instructions and extensions. The RISC-V Privileged Architecture and Debug Specification become normative only for the corresponding stages above.
+Complete the structurally decoded CSR instructions and expand machine-mode state only as required by the target software stack.
+
+The current implementation contract already requires CSR operation classification, prior-value writeback, minimum trap CSRs, and a machine-mode-only MRET PC result. This stage completes architectural policy around that foundation.
+
+Required work:
+
+- define the supported CSR address set beyond the minimum trap CSRs;
+- implement and verify read, write, set, and clear CSR forms;
+- define read-only and WARL behavior;
+- add `mstatus` and any required ID or counter CSRs;
+- complete `mtvec`, `mepc`, `mcause`, and `mtval` reset and WARL behavior;
+- complete MRET privilege and interrupt-enable side effects;
+- define behavior for unsupported CSR addresses; and
+- add CSR read-modify-write corner-case tests.
+
+Do not implement the full privileged architecture unless the target software requires it. A small, explicit machine-mode subset is preferable to an undocumented partial implementation.
+
+## 6. Stage 5: Machine Interrupts
+
+Add asynchronous interrupts only after synchronous traps and CSR state are stable.
+
+Minimum candidate sources:
+
+- machine timer interrupt;
+- machine external interrupt;
+- optionally machine software interrupt.
+
+Required work:
+
+- define synchronizers for asynchronous inputs;
+- define pending and enable state;
+- define priority relative to synchronous exceptions;
+- define sampling points in the non-pipelined FSM;
+- define `mip`, `mie`, and `mstatus` interactions;
+- define direct versus vectored `mtvec` behavior; and
+- prove that interrupts are taken only at architecturally precise boundaries.
+
+Interrupt requests should reuse `rv32_trap_pkg::trap_req_t`, whose `interrupt` field already distinguishes interrupts from synchronous exceptions.
+
+## 7. Stage 6: Optional ISA Extensions
+
+Extensions shall be requirement-driven.
+
+### 7.1 Zifencei
+
+Add only if instruction memory can observe stale data after writes or if self-modifying code is supported. Required work includes instruction-side invalidation semantics, not only decode.
+
+### 7.2 Zicsr
+
+Zicsr is already part of the contracted decoder and minimum CSR/SYSTEM foundation. Its support claim remains pending until the execution boundary, CSR policy, and tests are complete.
+
+### 7.3 M Extension
+
+Add multiply and divide only if required by toolchain output or performance goals.
+
+Design questions:
+
+- iterative versus combinational implementation;
+- divide-by-zero and overflow behavior;
+- additional wait states;
+- result timing and commit integration.
+
+### 7.4 C Extension
+
+Compressed instructions significantly affect fetch and PC alignment.
+
+Required architectural changes include:
+
+- 16-bit instruction alignment;
+- variable instruction length;
+- fetch extraction across word boundaries;
+- revised branch and jump alignment checks;
+- revised `mepc` and `mtval` behavior;
+- decoder front-end expansion.
+
+Do not treat C as a decoder-only extension.
+
+### 7.5 A Extension
+
+Atomics require memory-system ownership decisions before decoder work begins.
+
+Required architectural changes include:
+
+- reservation state;
+- LR/SC semantics;
+- atomic read-modify-write behavior;
+- ordering and FENCE interaction;
+- external-bus atomicity guarantees.
+
+### 7.6 Other Extensions
+
+Bit-manipulation, counters, debug, floating-point, vector, and supervisor-mode features should be planned separately because each changes software contracts and verification scope materially.
+
+## 8. Support Matrix
+
+| Feature | Category | Planned status |
+| --- | --- | --- |
+| FENCE | Base RV32I completion | Contracted as a serialization no-op; RTL and tests pending |
+| ECALL / EBREAK | Base RV32I plus traps | Structural decode and trap outcomes contracted; RTL and tests pending |
+| Machine CSRs | Machine-mode support | Minimum trap state contracted; reset, WARL, and broader set pending |
+| MRET | Machine-mode support | Minimal `mepc` PC path contracted; full privilege effects pending |
+| WFI | Optional machine-mode behavior | Add only with interrupt policy |
+| Zicsr | CSR extension | Structurally contracted; execution and compliance evidence pending |
+| Synchronous exceptions | Execution environment | Representation and precise core path contracted; RTL and tests pending |
+| Machine interrupts | Privileged behavior | Add after precise synchronous traps |
+| Zifencei | Optional extension | Add with self-modifying-code requirement |
+| M | Optional extension | Add if software or performance requires it |
+| C | Optional extension | Requires fetch redesign |
+| A | Optional extension | Requires memory-system atomicity design |
+
+## 9. Fault and Misalignment Policy
+
+Fault policy shall remain layered:
+
+- unsupported or reserved instruction encodings: reported directly by the decoder before specialist dispatch;
+- instruction-address misalignment: reported by CTRL validation of a taken control-transfer target before normal commit;
+- load/store misalignment: reported locally by the LSU without a memory-adapter request;
+- impossible LSU micro-operations: reported defensively by the LSU as illegal instructions without a memory-adapter request;
+- architectural-range and physical-memory failures: detected by memory adapters and translated by the LSU into access-fault reports;
+- CSR or privilege violations: detected by CSR/SYSTEM logic;
+- PMP or access-control violations: added later if protection mechanisms are introduced.
+
+Each layer shall report one architectural cause without duplicating ownership. The core shall qualify candidates by FSM state and selected execution class, and a decoder trap shall prevent specialist dispatch. Any additional cause priority shall be explicit when a single active unit could detect multiple conditions.
+
+## 10. Software and Compliance Strategy
+
+Each stage shall add tests at three levels:
+
+### 10.1 Directed RTL Tests
+
+Verify exact state transitions, cause codes, retained metadata, request suppression, commit suppression, and return behavior.
+
+### 10.2 Architectural Instruction Tests
+
+Run applicable RISC-V architectural tests for the declared ISA string and privilege subset.
+
+### 10.3 Software Tests
+
+Use small freestanding programs before attempting larger software stacks:
+
+1. reset and branch-only smoke test;
+2. load/store and stack test;
+3. illegal-instruction trap test;
+4. ECALL handler test;
+5. CSR read-modify-write test;
+6. timer-interrupt test;
+7. optional extension-specific test.
+
+Toolchain flags and ISA strings shall match implemented extensions exactly.
+
+## 11. Milestones
+
+### Milestone A: Freeze the Environment
+
+Deliverables:
+
+- memory map;
+- reset vector;
+- MMIO contract;
+- linker script;
+- startup assumptions.
+
+### Milestone B: Implement Precise Synchronous Traps
+
+Deliverables:
+
+- shared report integration across the decoder, LSU, CTRL, CSR/SYSTEM, and core;
+- state-qualified source selection with decoder-trap precedence;
+- five-state core flow with retained trap metadata;
+- minimum machine trap CSRs and trap-vector control transfer;
+- illegal-instruction, access-fault, and misalignment handling; and
+- directed proof that trapped instructions cannot perform normal commit.
+
+### Milestone C: Complete Base RV32I
+
+Deliverables:
+
+- FENCE serialization no-op;
+- ECALL and EBREAK exact SYSTEM handling;
+- reserved-encoding behavior;
+- architectural compliance tests.
+
+### Milestone D: Complete Machine Mode
+
+Deliverables:
+
+- complete Zicsr instruction-family behavior;
+- required machine CSRs beyond the trap minimum;
+- full MRET and `mstatus` behavior;
+- trap software tests.
+
+### Milestone E: Add Interrupts
+
+Deliverables:
+
+- timer path;
+- enable and pending CSRs;
+- precise interrupt entry;
+- interrupt return tests.
+
+### Milestone F: Add Requirement-Driven Extensions
+
+Each extension requires its own contract, RTL plan, and verification plan.
+
+## 12. Evidence Required for Support Claims
+
+A feature may be listed as supported only when:
+
+- decode exists for all required encodings;
+- execution semantics are implemented;
+- architectural side effects are precise;
+- error and trap behavior is defined;
+- directed tests pass;
+- relevant architectural tests pass or documented exclusions exist;
+- software-visible documentation names the feature and constraints.
+
+Planned, partial, and supported are distinct statuses.
+
+## 13. Unresolved Decisions
+
+The following remain open until an implementation plan or decision record resolves them:
+
+- reset vector and complete execution-environment map;
+- exact reset values and WARL behavior for `mtvec`, `mepc`, `mcause`, and `mtval`;
+- exact CSR/SYSTEM `tval` values for synchronous exception classes;
+- exact machine CSR set beyond the minimum trap state;
+- privilege and `mstatus` semantics for complete MRET behavior;
+- interrupt synchronization and priority;
+- whether atomic operations are required;
+- whether compressed instructions are required;
+- whether instruction-cache or self-modifying-code support is required;
+- which privileged-architecture version governs machine-mode work.
+
+## References
+
+- [RISC-V Unprivileged ISA, 20240411](https://docs.riscv.org/reference/isa/unpriv/unpriv-index.html)
+- [RISC-V Privileged Architecture](https://docs.riscv.org/reference/isa/priv/priv-index.html)
+- [RISC-V Architectural Test Framework](https://github.com/riscv-non-isa/riscv-arch-test)
+- [RISC-V Compliance Working Group repositories](https://github.com/riscv-non-isa)
+- [Core architecture](RV32I_Core_Architecture.md)
+- [Core implementation](RV32I_Core_Implementation.md)
+- [Instruction decoder contract](RV32I_Instruction_Decoder_Design_Contract.md)
+- [LSU contract](RV32I_LSU_Contract.md)
+- [CSR/SYSTEM contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+- [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
+
+## Metadata
+
+- Document type: roadmap
+- Scope: exceptions, traps, machine mode, interrupts, base-ISA completion, and optional extensions
+- Evidence policy: Section 12 of this roadmap

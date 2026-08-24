@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-This document defines the semantic boundary of `rv32_lsu`. RTL is authoritative for ports, encoded operation values, and combinational implementation details. This contract defines ownership, transaction behavior, and the meaning of results.
+This document defines the semantic boundary of `rv32_lsu`. RTL is authoritative for ports, encoded operation values, and combinational implementation details. This contract defines ownership, transaction behavior, result meaning, and architectural trap reporting.
 
 The terms **shall**, **shall not**, and **may** denote a requirement, a prohibition, and an implementation choice, respectively.
 
@@ -29,7 +29,7 @@ The LSU shall remain stateless and memory-map agnostic. It shall not own the PC,
 
 ### 3.1 Core
 
-The core shall own request lifetime, operand lookup, instruction and data-operation sequencing, response capture, architectural commit, and handling of reported memory errors. It shall hold each asserted request and all associated inputs stable until completion.
+The core shall own request lifetime, operand lookup, instruction and data-operation sequencing, response capture, architectural commit, and handling of reported LSU traps. It shall hold each asserted request and all associated inputs stable until completion.
 
 ### 3.2 LSU
 
@@ -42,17 +42,17 @@ The LSU shall own:
 - architectural byte-lane selection;
 - lane-positioned store data and write strobes;
 - load extraction and sign or zero extension; and
-- local completion with error for an invalid or misaligned data operation.
+- local trap completion for a misaligned data operation or defensive invalid micro-operation.
 
 ### 3.3 Adapters
 
-The IMEM and DMEM adapters shall own architectural-range validation, physical address mapping, backend sequencing, latency, and backend error translation. The LSU shall not issue backend-local addresses or signals.
+The IMEM and DMEM adapters shall own architectural-range validation, physical address mapping, backend sequencing, latency, and backend error detection. The LSU shall translate adapter errors into architectural access-fault reports and shall not issue backend-local addresses or signals.
 
 ## 4. Core-Facing Semantics
 
 ### 4.1 Instruction fetch
 
-The core supplies an explicit 32-bit architectural byte address and a level-sensitive fetch request. The LSU forwards the transaction to the IMEM adapter and returns its completion, instruction word, and error indication.
+The core supplies an explicit 32-bit architectural byte address and a level-sensitive fetch request. The LSU forwards the transaction to the IMEM adapter and returns its completion, instruction word, and architectural trap report.
 
 The LSU shall not infer that the supplied address is the live PC and shall not update the instruction register.
 
@@ -62,7 +62,7 @@ The core supplies the decoded LSU operation, base-register value, store-source v
 
 The effective data address is the 32-bit sum of the base value and immediate. The LSU shall present that full architectural byte address to the DMEM adapter without rebasing or truncation.
 
-A successful load result shall be a fully selected and sign- or zero-extended 32-bit value. The load-result output is inactive for stores. The LSU shall not select a destination register or authorize writeback.
+A successful load result shall be a fully selected and sign- or zero-extended 32-bit value. The load-result output is inactive for stores. A failed data transaction shall return a trap report rather than a boolean core-facing error. The LSU shall not select a destination register or authorize writeback.
 
 ## 5. Adapter-Facing Data Convention
 
@@ -80,25 +80,62 @@ Core-side and adapter-side requests are level-sensitive transaction-valid signal
 
 A transaction completes when `req && ready` is observed on a rising clock edge. `err` qualifies that completion and shall be meaningful only when `ready` is asserted. After completion, the requester shall deassert `req` before starting another transaction on the same interface. No explicit error-clear transaction exists.
 
-Core-facing completion and error outputs shall be consumed only while the corresponding fetch or data request is asserted. A Core-facing transaction completes when that request and its ready output are asserted together.
+Core-facing completion and trap outputs shall be consumed only while the corresponding fetch or data request is asserted. A core-facing transaction completes when that request and its ready output are asserted together.
 
 The LSU shall not capture requests or contain a transaction FSM. The core owns the core-facing request lifetime, and each adapter owns backend temporal behavior.
 
 The baseline permits at most one outstanding transaction per interface. The baseline core does not overlap instruction and data transactions.
 
-## 7. Local Data Errors
+## 7. Architectural Trap Reports
+
+The LSU shall expose `if_trap_o` and `data_trap_o`, each typed as `rv32_trap_pkg::trap_req_t`. The common structure carries:
+
+| Field | Meaning |
+| --- | --- |
+| `valid` | A trap is reported for the active transaction |
+| `interrupt` | Trap class; always clear for LSU-generated reports |
+| `code[30:0]` | Architectural exception cause |
+| `tval[31:0]` | Architectural trap value; the faulting address for memory faults |
+
+Every reported LSU trap shall have `valid = 1` and `interrupt = 0`. The LSU shall report:
+
+| Condition | Cause | `tval` |
+| --- | --- | --- |
+| Instruction access fault | `EXC_INST_ACCESS_FAULT` | Requested instruction address |
+| Load address misaligned | `EXC_LOAD_ADDR_MISALIGNED` | Effective data address |
+| Load access fault | `EXC_LOAD_ACCESS_FAULT` | Effective data address |
+| Store address misaligned | `EXC_STORE_ADDR_MISALIGNED` | Effective data address |
+| Store access fault | `EXC_STORE_ACCESS_FAULT` | Effective data address |
+| Invalid LSU micro-operation | `EXC_ILLEGAL_INST` | Zero |
+
+Adapter-originated access faults shall be reported only for an active, locally valid transaction. Instruction traps shall be invalid when the fetch request is clear. Data completion and data traps shall be inactive when the data request is clear.
+
+The LSU remains a synchronous-exception source only. Interrupt construction and arbitration remain outside this contract.
+
+## 8. Local Data Traps
 
 Byte accesses may use any byte address. Halfword accesses require `address[0] == 0`, and word accesses require `address[1:0] == 2'b00`.
 
-For an asserted misaligned data request or unsupported local LSU operation, the LSU shall:
+For an asserted local data-validation fault with a defined architectural cause, including a misaligned data request or invalid LSU micro-operation, the LSU shall:
 
 - suppress the DMEM request;
-- report immediate data completion with error; and
+- report immediate data completion with a valid architectural trap; and
 - produce no architectural side effect directly.
 
-Trap routing and execution-environment policy remain core responsibilities.
+An active data request carrying an impossible or unsupported `lsu_op_i` value shall report `EXC_ILLEGAL_INST` with `tval = 0`. This defensive path exists because the LSU need not receive the original instruction bits. It shall remain unreachable under correct decoder and core dispatch and may additionally be guarded by assertions.
 
-## 8. Conformance
+The LSU outcome classes are therefore:
+
+```text
+valid operation    -> normal memory semantics
+local memory fault -> architectural alignment trap
+invalid LSU uop    -> illegal-instruction trap
+adapter failure    -> architectural access-fault trap
+```
+
+Trap qualification, arbitration, and execution-environment policy remain core responsibilities.
+
+## 9. Conformance
 
 Verification shall demonstrate that:
 
@@ -106,9 +143,12 @@ Verification shall demonstrate that:
 - effective addresses remain full 32-bit architectural byte addresses;
 - store data and strobes match the addressed lanes;
 - load selection and extension cover every implemented width and lane;
-- misaligned or unsupported operations complete locally with error and issue no DMEM request;
+- misaligned operations complete locally with the correct cause and effective-address `tval` and issue no DMEM request;
+- every invalid LSU micro-operation completes locally with `EXC_ILLEGAL_INST`, zero `tval`, and no DMEM request;
+- defensive invalid-operation reporting remains transaction-qualified and does not replace decoder encoding checks;
 - pending request inputs remain stable;
-- adapter errors are returned only as transaction completions;
+- adapter errors are translated into transaction-qualified instruction, load, or store access-fault reports;
+- inactive core-facing requests suppress trap validity and data completion;
 - the LSU contains no transaction-lifetime or architectural state; and
 - replacing either memory adapter does not change LSU semantics.
 

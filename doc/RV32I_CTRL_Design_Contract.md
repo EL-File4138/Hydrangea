@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-This document defines the semantic boundary between the core and CTRL. The RTL module remains authoritative for port names, widths, and encoded operation values; this contract defines operand ownership and the meaning of CTRL results.
+This document defines the semantic boundary between the core and CTRL. The RTL module remains authoritative for port names, widths, and encoded operation values; this contract defines operand ownership, result meaning, and control-target trap ownership.
 
 The terms **shall**, **shall not**, and **may** denote a requirement, a prohibition, and an implementation choice, respectively.
 
@@ -67,9 +67,26 @@ register value = pc_i + 4
 
 The mandatory clearing of target bit zero shall be performed explicitly inside CTRL. `operand_b_i` is inactive for `JALR`.
 
+### 4.4 Instruction-address validation
+
+CTRL shall detect instruction-address misalignment for a control target that the current instruction will take. Validation shall use the complete target after instruction-specific processing, including JALR bit-zero clearing.
+
+The CTRL trap candidate shall use `rv32_trap_pkg::trap_req_t`; the eventual RTL port may be named `ctrl_trap_o` or `trap_o` consistently with integration naming.
+
+For the baseline without compressed instructions, a taken target with `next_pc[1:0] != 2'b00` shall report a `rv32_trap_pkg::trap_req_t` candidate equivalent to:
+
+```text
+valid     = 1
+interrupt = 0
+code      = EXC_INST_ADDR_MISALIGNED
+tval      = attempted next PC
+```
+
+A not-taken conditional branch shall not report an alignment trap for its unused branch target. A normal CTRL result shall have trap validity clear.
+
 ## 5. Core Integration
 
-For an instruction dispatched to CTRL, CTRL owns both the taken and fall-through next-PC calculations. For an ordinary non-control instruction, the core owns sequential progression by four bytes.
+For an instruction dispatched to CTRL, CTRL owns both the taken and fall-through next-PC calculations and any applicable target-alignment trap candidate. For an ordinary non-control instruction, the core owns sequential progression by four bytes.
 
 The architectural selection is equivalent to:
 
@@ -82,11 +99,11 @@ else
 
 Here, `ctrl_pc` is CTRL's complete next-PC result and `instruction_pc` is the PC associated with the executing instruction. The code is illustrative and does not fix signal names or PC-register timing.
 
-CTRL does not own the PC register, instruction sequencing, destination-register selection, or writeback enable. Its next-PC and register-result outputs are independent raw values; the core commits each through the appropriate architectural path.
+CTRL does not own the PC register, instruction sequencing, destination-register selection, writeback enable, or trap entry. Its next-PC, register-result, and trap outputs are independent candidates; the core commits normal results or accepts the trap through mutually exclusive architectural paths.
 
-## 6. Validity
+## 6. Input Validity and Trap Scope
 
-CTRL may assume that the decoder and core provide a valid control-transfer micro-operation and the operands active for that operation. It shall not repeat raw instruction-encoding validation.
+CTRL may assume that the decoder and core provide a valid control-transfer micro-operation and the operands active for that operation. It shall not repeat raw instruction-encoding validation. The decoder reports encoding failures before the core meaningfully dispatches a specialist operation.
 
 Inputs identified as inactive above are unspecified and shall not affect active results. The register-result output for an operation without register writeback is likewise unspecified and shall not be consumed.
 
@@ -99,6 +116,9 @@ Verification shall cover:
 - positive, negative, and wrapping PC-relative targets;
 - `JAL` target and link generation;
 - `JALR` target and link generation, including explicit bit-zero clearing;
+- instruction-address misalignment for each taken control-transfer class;
+- no alignment trap for an untaken branch;
+- trap validity clear for aligned targets;
 - independence from inactive operands; and
 - core integration in which CTRL supplies conditional-branch fall-through while the core supplies ordinary non-control progression.
 

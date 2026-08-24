@@ -1,63 +1,196 @@
 # RV32I Instruction Decoder Design Contract
 
-**Scope:** Instruction-to-semantic-record translation
+## Purpose
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+This document defines the semantic boundary of the RV32I instruction decoder. RTL packages are authoritative for encoded type values and field widths. This contract defines encoding-trap ownership, operand dependencies, immediate meaning, execution classification, and the division between structural decode and specialist-unit policy.
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+## 1. Semantic Boundary
 
-## 1. Purpose
+The decoder shall translate the retained 32-bit instruction into one typed semantic record and one architectural trap candidate. Downstream logic shall consume those outputs rather than independently reconstructing opcode, `funct3`, or `funct7` meaning.
 
-This document defines the semantic boundary of `rv32_instdec`. RTL and decoder tests are authoritative for accepted instruction encodings, field widths, enum values, and the current packed-record layout. This contract defines field validity, ownership, and downstream interpretation.
+The semantic record shall identify at least:
 
-The terms **shall**, **shall not**, and **may** denote a requirement, a prohibition, and an implementation choice, respectively.
+- ALU operation;
+- register-source usage;
+- destination-register write intent;
+- writeback-source class;
+- normal PC-source class;
+- a normalized immediate;
+- CSR or SYSTEM operation class; and
+- the five-bit CSR immediate source.
 
-## 2. Semantic Boundary
+The shared record shall therefore include fields equivalent to:
 
-The decoder shall translate one stable 32-bit instruction into `inst_sem_t`. It shall identify static decode support, architectural register references and dependencies, a normalized immediate, typed execution operations, execution/result class, and destination-write authorization.
+```systemverilog
+csr_op_t    csr_op;
+logic [4:0] csr_uimm;
+pc_src_t    pc_src;
+```
 
-The decoder shall not generate FSM state, PC write timing, register-file enables, operand mux controls, memory requests, result-retention controls, trap entry, or other cycle-specific behavior.
+`inst_sem_t` shall not contain a semantic `legal` or `valid` field. The decoder shall instead expose `inst_trap_o`, serving the decoder `trap_o` role, with type `rv32_trap_pkg::trap_req_t`.
 
-Execution units shall consume semantic operations and operand values supplied by the core. They shall not repeat raw instruction-encoding validation.
+The decoder shall not read the register file, access memory, update architectural state, or select a trap vector.
 
-## 3. Validity
+## 2. Encoding Trap Reporting
 
-`legal` means that the decoder accepts the instruction encoding for semantic processing. It does not claim that the integrated core implements the complete execution path, and it does not report dynamic execution faults.
+For a normally decoded instruction, `inst_trap_o.valid` shall be clear and the semantic record shall carry the instruction's valid execution meaning.
 
-When `legal` is clear, every other semantic field is unspecified and shall not be consumed. A default bit pattern does not acquire semantic meaning in this state.
+For an illegal or unsupported encoding, the decoder shall report:
 
-When `legal` is set, only fields active for that instruction are meaningful. Inactive operation fields shall not be inspected. Typed operation enums do not require invalid members because validity is supplied independently.
+```text
+inst_trap_o.valid     = 1
+inst_trap_o.interrupt = 0
+inst_trap_o.code      = EXC_ILLEGAL_INST
+inst_trap_o.tval      = inst_i
+```
 
-## 4. Register References and Dependencies
+The decoder shall assign benign defaults to every semantic field on all combinational paths. The core shall ignore the complete semantic record whenever `inst_trap_o.valid` is set.
 
-`rs1` and `rs2` are architectural register indices. `rs1_used` and `rs2_used` qualify true architectural dependencies; the flags shall not be set merely because the encoded bit positions exist.
+The decoder owns illegal conditions fully determined by instruction bits, including unsupported major opcodes, reserved `funct3` or `funct7` combinations, unsupported extension encodings, reserved SYSTEM `funct3` values, unsupported FENCE.I encodings, and other structurally illegal forms.
 
-The core shall perform register-file lookup and route the resulting values to execution units. Register indices shall not cross the execution-unit boundary as operands.
+The decoder shall not determine legality that depends on specialist-unit state or implementation resources. CSR implementation, write permission, privilege permission, exact `CSR_SYS` interpretation, memory alignment, memory-access failure, and control-target alignment belong to their respective units.
 
-`rd_write` authorizes architectural destination writeback for the instruction class. It shall remain independent of the encoded destination index, including `rd == x0`. Preservation of the architectural zero register belongs to the register-file boundary.
+For the SYSTEM major opcode with `funct3 == 3'b000`, the decoder shall emit `csr_op = CSR_SYS` without resolving the exact SYSTEM operation. A structurally valid SYSTEM dispatch may therefore produce a CSR/SYSTEM trap during execution.
 
-## 5. Immediate
+## 3. Register Dependencies and Write Intent
 
-The decoder shall expose a complete 32-bit execution operand rather than an encoded immediate fragment. Reconstruction, extension, placement of implied low bits, and U-type positioning belong on the decoder side of the boundary.
+Source usage flags shall represent true register-file dependencies:
 
-For shift-immediate instructions, the semantic immediate shall contain the unsigned shift amount rather than the complete encoded I-type field. Downstream units shall not reconstruct immediates from the raw instruction.
+- register-register ALU operations use `rs1` and `rs2`;
+- immediate ALU operations use `rs1` only;
+- loads use `rs1` only;
+- stores use `rs1` for the base and `rs2` for store data;
+- conditional branches use both sources;
+- JAL uses neither source;
+- JALR uses `rs1` only;
+- LUI and AUIPC use neither source;
+- register-source CSR operations use `rs1`;
+- immediate-source CSR operations use no register source; and
+- SYSTEM and FENCE operations use no register source.
 
-## 6. Execution and Result Classification
+Destination-register write intent shall be asserted for ALU, upper-immediate, jump-and-link, load, and CSR read-result forms. It shall be clear for stores, conditional branches, SYSTEM operations, FENCE, and benign semantic defaults accompanying a decoder trap. Architectural suppression of writes to `x0` remains a core commit responsibility.
 
-ALU, CTRL, and LSU requests shall use the typed operations defined by `rv32_inst_pkg`. Their numerical encodings and correspondence with ISA fields remain package implementation details.
+## 4. Immediate Semantics
 
-`wb_src` identifies the semantic execution/result-producing class used by the core for dispatch and result selection. It remains meaningful for a branch or store even though that instruction does not write a GPR. `rd_write`, not `wb_src`, is the sole register-write authorization.
+The decoder shall emit one normalized 32-bit immediate:
 
-For a legal instruction, the selected execution-unit operation may be trusted as statically valid. Dynamic checks such as address alignment and memory failure remain outside the decoder.
+- I-type immediates are sign-extended;
+- S-type immediates are sign-extended;
+- B-type immediates are sign-extended and include the implicit low zero;
+- U-type immediates occupy bits 31:12 and have twelve low zeros;
+- J-type immediates are sign-extended and include the implicit low zero; and
+- shift-immediate operations use the zero-extended five-bit shift amount.
 
-## 7. Combinational Use
+For CSR and SYSTEM encodings, `sem.imm[11:0]` shall preserve the instruction's 12-bit CSR or SYSTEM immediate field. No separate CSR-address field shall be added. The dedicated CSR immediate source shall preserve `inst[19:15]`, equivalently `rs1[4:0]`, for immediate CSR forms and shall be zero for non-immediate forms.
 
-The decoder shall remain combinational. The core shall hold the current instruction stable or retain its semantics for as long as downstream execution requires them; a change to core timing shall not introduce decoder-owned instruction state.
+The decoder shall not add the PC, a register value, or an architectural base address to an immediate.
 
-Decoder acceptance and integrated-core support are separate milestones. An instruction may be decoded before its execution path is complete, but project support claims shall require both execution behavior and verification.
+## 5. ALU Classification
 
-## 8. Conformance and Change Control
+The ALU operation field shall distinguish the supported arithmetic, logical, comparison, and shift operations. The decoder shall report invalid arithmetic `funct3` and `funct7` combinations rather than mapping them to a nearby supported operation.
 
-Verification shall test the instruction-to-semantic-record mapping independently of core FSM timing. It shall cover accepted and rejected encodings, active-field values, architectural dependency flags, normalized immediates, execution classification, and write authorization.
+The ALU operation may be inactive for instruction classes that do not consume an ALU result.
 
-This contract requires revision if field validity, dependency meaning, immediate normalization, execution classification, or decoder/core ownership changes. Adding encodings or changing enum values requires updates to RTL and tests but not this contract when the semantic boundary remains unchanged.
+## 6. Memory Classification
+
+Supported memory semantics are:
+
+| Instruction class | Width | Signed load | Register dependencies | Destination write |
+| --- | --- | --- | --- | --- |
+| LB | byte | yes | `rs1` | yes |
+| LH | halfword | yes | `rs1` | yes |
+| LW | word | not applicable | `rs1` | yes |
+| LBU | byte | no | `rs1` | yes |
+| LHU | halfword | no | `rs1` | yes |
+| SB | byte | not applicable | `rs1`, `rs2` | no |
+| SH | halfword | not applicable | `rs1`, `rs2` | no |
+| SW | word | not applicable | `rs1`, `rs2` | no |
+
+Unsupported load or store `funct3` values shall produce a decoder trap. The decoder defines the operation semantics but shall not calculate the effective address, generate byte strobes, perform alignment checks, or authorize writeback.
+
+## 7. Control-Transfer Classification
+
+The decoder shall distinguish conditional branch, JAL, and JALR semantics. It shall report invalid branch `funct3` values and invalid JALR encodings.
+
+The decoder emits branch or jump intent, the normalized displacement, and the control-transfer PC-source class. It shall not compare operands, calculate the target or link value, clear the JALR target low bit, validate target alignment, or update the PC.
+
+## 8. CSR and SYSTEM Classification
+
+The SYSTEM major opcode shall map `funct3` as follows:
+
+| `funct3` | Semantic operation | Source form |
+| --- | --- | --- |
+| `000` | `CSR_SYS` | SYSTEM immediate |
+| `001` | `CSR_RW` | register |
+| `010` | `CSR_RS` | register |
+| `011` | `CSR_RC` | register |
+| `100` | Decoder illegal-instruction trap | none |
+| `101` | `CSR_RWI` | five-bit immediate |
+| `110` | `CSR_RSI` | five-bit immediate |
+| `111` | `CSR_RCI` | five-bit immediate |
+
+Structurally valid register and immediate CSR forms shall select CSR writeback, assert destination-register write intent, and select the sequential normal-PC source. The SYSTEM form shall select CSR writeback and the CSR/SYSTEM normal-PC source without destination-register write intent.
+
+The CSR/SYSTEM execution boundary shall interpret the preserved SYSTEM immediate at minimum as follows:
+
+| `imm[11:0]` | Exact operation |
+| --- | --- |
+| `12'h000` | ECALL |
+| `12'h001` | EBREAK |
+| `12'h302` | MRET |
+| Other | Illegal-instruction trap |
+
+ECALL and EBREAK shall produce their defined synchronous exceptions. MRET shall produce `mepc` as its normal PC result. The main decoder shall not duplicate this exact-encoding policy.
+
+## 9. FENCE Classification
+
+The base FENCE encoding with `funct3 = 000` shall be legal. In this implementation it is a serialization no-op: it uses no register source, writes no destination register, issues no LSU transaction, and selects `pc + 4` through the normal sequential path.
+
+Because FENCE has no architectural writeback value, its writeback-source field is not consumed. The implementation shall assign it a non-memory completion class so that it cannot be dispatched to the LSU.
+
+FENCE.I and other unsupported MISC-MEM encodings shall produce a decoder illegal-instruction trap.
+
+## 10. Result and PC Classification
+
+The writeback-source field shall classify the producer of a normal destination-register value. Supported classes include immediate, ALU, control-transfer link, memory load, and CSR read result.
+
+The normal PC-source field is independent of writeback selection. It shall distinguish:
+
+- sequential `pc + 4`;
+- the control-transfer unit result; and
+- the CSR/SYSTEM unit result.
+
+Ordinary non-control, non-SYSTEM instructions shall select the sequential source. Branches, JAL, and JALR shall select the control-transfer source. Only the structural SYSTEM form shall select the CSR/SYSTEM source at decode time.
+
+Trap entry is an exceptional override selected by the core and shall not be encoded as a normal decoder PC source.
+
+## 11. Conformance
+
+Decoder verification shall show that:
+
+- every supported RV32I encoding produces the required semantic record with no decoder trap;
+- every unsupported or reserved encoding owned by the decoder reports `EXC_ILLEGAL_INST` with the raw instruction in `tval`;
+- semantic defaults are benign and ignored whenever the decoder trap is valid;
+- no semantic legality or validity boolean is required by the core;
+- source-usage and destination-write flags match true dependencies;
+- immediates, CSR addresses, and CSR immediate sources are reconstructed correctly;
+- CSR and SYSTEM forms receive the required operation, writeback, and PC classifications;
+- FENCE is legal and side-effect free while FENCE.I remains unsupported;
+- writeback and normal PC selection remain independent; and
+- exact SYSTEM, CSR-access, memory, and control-target legality is not duplicated in the decoder.
+
+## Module Contracts
+
+- [Core architecture](RV32I_Core_Architecture.md)
+- [Core implementation](RV32I_Core_Implementation.md)
+- [CTRL unit contract](RV32I_CTRL_Design_Contract.md)
+- [LSU contract](RV32I_LSU_Contract.md)
+- [CSR/SYSTEM contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+- [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
+
+## Metadata
+
+- Document type: module contract
+- Authority: semantic interpretation of `rv32_instdec`
+- RTL authority: `rtl/core/inst/rv32_instdec.sv`, `rtl/core/type/rv32_inst_pkg.sv`
+- Verification authority: decoder unit tests and core integration tests
