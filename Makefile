@@ -55,7 +55,7 @@ SW_DIR      ?= simulation_wave
 CONSTR_DIR  ?= constraints
 BUILD_DIR   ?= build
 
-SIM_BUILD   := $(BUILD_DIR)/sim
+SIM_BUILD   := $(BUILD_DIR)/sim/$(TOP)
 SW_BUILD    := $(BUILD_DIR)/simulation_wave
 SYNTH_BUILD := $(BUILD_DIR)/synth
 FORMAL_BUILD:= $(BUILD_DIR)/formal_verification
@@ -64,14 +64,17 @@ SURFER      ?= surfer
 
 
 # ------------------------------------------------------------------------------
-# RTL source manifest
+# RTL and testbench source manifests
 #
-# Keep source ordering and inclusion explicit. Each line in RTL_FILELIST is
-# relative to the repository root so it also works with HDL tools' -f option.
+# Keep source ordering and inclusion explicit. Each line is relative to the
+# repository root so it also works with HDL tools' -f option.
 # ------------------------------------------------------------------------------
 
 RTL_FILELIST ?= $(RTL_DIR)/files.f
 RTL_SRCS := $(shell sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$$/d' $(RTL_FILELIST))
+TB_FILELIST ?= $(TB_DIR)/tb_files.f
+TB_SRCS := $(shell sed -e '/^[[:space:]]*#/d' -e '/^[[:space:]]*$$/d' $(TB_FILELIST))
+SIM_SRCS := $(RTL_SRCS) $(TB_SRCS)
 
 
 # ------------------------------------------------------------------------------
@@ -148,6 +151,8 @@ LDFLAGS := \
 
 SIM ?= verilator
 
+# Prefer a listed `_tb` wrapper while keeping TOP named after the RTL DUT.
+SIM_TOP := $(if $(filter $(TOP)_tb.sv,$(notdir $(TB_SRCS))),$(TOP)_tb,$(TOP))
 COCOTB_TEST_MODULE ?= test-$(TOP)
 
 VERILATOR_FLAGS ?= \
@@ -193,8 +198,8 @@ help:
 		'  make wave         Open the latest FST waveform in Surfer' \
 		'  make formal       Run SymbiYosys formal jobs' \
 		'  make formal-smoke Run smoke formal job' \
-		'  make update-files Refresh rtl/files.f from rtl/**/*.sv' \
-		'  make check-files  Check whether rtl/files.f is up to date' \
+		'  make update-files Refresh RTL and testbench SystemVerilog manifests' \
+		'  make check-files  Check whether SystemVerilog manifests are up to date' \
 		'  make firmware     Build ELF, BIN, HEX and disassembly' \
 		'  make disasm       Print firmware disassembly' \
 		'  make elf-info     Print ELF headers/sections/symbols' \
@@ -302,8 +307,8 @@ cocotb-build: $(SIM_BUILD)
 		-f $(CURDIR)/Makefile.cocotb \
 		$(COCOTB_BUILD_TARGET) \
 		SIM=$(SIM) \
-		TOP=$(TOP) \
-		RTL_SRCS="$(addprefix $(CURDIR)/,$(RTL_SRCS))" \
+		TOP=$(SIM_TOP) \
+		RTL_SRCS="$(addprefix $(CURDIR)/,$(SIM_SRCS))" \
 		TB_DIR="$(CURDIR)/$(TB_DIR)" \
 		VERILATOR_FLAGS="$(VERILATOR_FLAGS)" \
 		COCOTB_TEST_MODULE=$(COCOTB_TEST_MODULE)
@@ -316,8 +321,8 @@ test/cocotb: cocotb-build
 		-C $(SIM_BUILD) \
 		-f $(CURDIR)/Makefile.cocotb \
 		SIM=$(SIM) \
-		TOP=$(TOP) \
-		RTL_SRCS="$(addprefix $(CURDIR)/,$(RTL_SRCS))" \
+		TOP=$(SIM_TOP) \
+		RTL_SRCS="$(addprefix $(CURDIR)/,$(SIM_SRCS))" \
 		TB_DIR="$(CURDIR)/$(TB_DIR)" \
 		VERILATOR_FLAGS="$(VERILATOR_FLAGS)" \
 		COCOTB_TEST_MODULE=$(COCOTB_TEST_MODULE)
@@ -332,8 +337,8 @@ sim/cocotb: cocotb-build
 		-C $(SIM_BUILD) \
 		-f $(CURDIR)/Makefile.cocotb \
 		SIM=$(SIM) \
-		TOP=$(TOP) \
-		RTL_SRCS="$(addprefix $(CURDIR)/,$(RTL_SRCS))" \
+		TOP=$(SIM_TOP) \
+		RTL_SRCS="$(addprefix $(CURDIR)/,$(SIM_SRCS))" \
 		TB_DIR="$(CURDIR)/$(TB_DIR)" \
 		VERILATOR_FLAGS="$(VERILATOR_FLAGS)" \
 		COCOTB_TEST_MODULE=$(COCOTB_TEST_MODULE) \

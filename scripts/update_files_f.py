@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 
-"""Update the Makefile RTL manifest from the source tree."""
+"""Update RTL and testbench SystemVerilog manifests from the source tree."""
 
 import argparse
 from pathlib import Path
 
 
-def build_manifest_entries(repo_root: Path, rtl_dir: Path) -> list[str]:
+def build_manifest_entries(repo_root: Path, source_dir: Path) -> list[str]:
     entries = []
-    for path in rtl_dir.rglob("*.sv"):
-        # Manifest should list only RTL sources, not itself.
-        if path.name == "files.f":
-            continue
+    for path in source_dir.rglob("*.sv"):
         rel = path.relative_to(repo_root).as_posix()
         entries.append(rel)
     entries.sort()
     return entries
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Regenerate rtl/files.f from discovered SystemVerilog sources."
+        description="Regenerate RTL and testbench SystemVerilog manifests."
     )
     parser.add_argument(
         "--repo-root",
@@ -31,7 +29,13 @@ def main() -> int:
         "--output",
         type=Path,
         default=Path("rtl/files.f"),
-        help="Output manifest path relative to --repo-root.",
+        help="RTL manifest path relative to --repo-root.",
+    )
+    parser.add_argument(
+        "--tb-output",
+        type=Path,
+        default=Path("testbench/tb_files.f"),
+        help="Testbench manifest path relative to --repo-root.",
     )
     parser.add_argument(
         "--check",
@@ -42,28 +46,39 @@ def main() -> int:
 
     repo_root = args.repo_root.resolve()
     output_path = (repo_root / args.output).resolve()
+    tb_output_path = (repo_root / args.tb_output).resolve()
     rtl_dir = (repo_root / "rtl").resolve()
+    tb_dir = (repo_root / "testbench").resolve()
 
     if not rtl_dir.is_dir():
         raise SystemExit(f"RTL directory not found: {rtl_dir}")
+    if not tb_dir.is_dir():
+        raise SystemExit(f"Testbench directory not found: {tb_dir}")
 
     entries = build_manifest_entries(repo_root, rtl_dir)
-    generated = "\n".join(entries) + "\n"
-
-    existing = ""
-    if output_path.exists():
-        existing = output_path.read_text(encoding="ascii")
+    tb_entries = build_manifest_entries(repo_root, tb_dir)
+    manifests = (
+        (output_path, "\n".join(entries) + "\n", len(entries)),
+        (tb_output_path, "\n".join(tb_entries) + "\n", len(tb_entries)),
+    )
 
     if args.check:
-        if existing != generated:
-            print(f"Manifest is out of date: {output_path}")
+        outdated = False
+        for path, generated, _ in manifests:
+            existing = path.read_text(encoding="ascii") if path.exists() else ""
+            if existing != generated:
+                print(f"Manifest is out of date: {path}")
+                outdated = True
+            else:
+                print(f"Manifest is up to date: {path}")
+        if outdated:
             return 1
-        print(f"Manifest is up to date: {output_path}")
         return 0
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(generated, encoding="ascii")
-    print(f"Updated {output_path} ({len(entries)} entries)")
+    for path, generated, count in manifests:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(generated, encoding="ascii")
+        print(f"Updated {path} ({count} entries)")
     return 0
 
 
