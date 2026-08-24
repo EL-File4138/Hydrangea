@@ -1,7 +1,11 @@
 rtl/core/arith/rv32_alu.sv
 rtl/core/ctrl/rv32_ctrl.sv
-rtl/core/ctrl/rv32_immgen.sv
-rtl/core/ctrl/rv32_instdec.sv
+rtl/core/inst/rv32_immgen.sv
+rtl/core/inst/rv32_instdec.sv
+rtl/core/mem/rv32_lsu.sv
 rtl/core/reg/rv32_regfile.sv
+rtl/core/rv32_core.sv
 rtl/core/type/rv32_inst_pkg.sv
+rtl/core/type/rv32_mem_if.sv
+rtl/mem/rv32_shared_sync_ram_adapter.sv
 rtl/mem/sync_ram.sv
