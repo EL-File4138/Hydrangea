@@ -2,7 +2,7 @@
 
 **Scope:** System structure and architectural ownership for the baseline RV32I core
 
-**Module contracts:** [Instruction Decoder](RV32I_Instruction_Decoder_Design_Contract.md), [CTRL](RV32I_CTRL_Design_Contract.md), [LSU](RV32I_LSU_Contract.md), [CSR/SYSTEM](RV32I_CSR_SYSTEM_Design_Contract.md), and [Memory Subsystem](RV32I_Memory_Subsystem_Design_Contract.md)
+**Module contracts:** [Instruction Decoder](RV32I_Instruction_Decoder_Design_Contract.md), [CTRL](RV32I_CTRL_Design_Contract.md), [LSU](RV32I_LSU_Contract.md), [CSR/SYSTEM Controller](RV32I_CSR_SYSTEM_Design_Contract.md), [CSR Register Bank](RV32I_CSR_Register_Bank_Design_Contract.md), and [Memory Subsystem](RV32I_Memory_Subsystem_Design_Contract.md)
 
 **Implementation plan:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
 
@@ -42,6 +42,10 @@ The core shall use one synchronous clock for persistent state. Completion, error
         |      |                ALU  CTRL  LSU  CSR/SYSTEM       |
         |      |                  \    |    |     /               |
         |      |                   pending results               |
+        |      |                         |                       |
+        |      |               CSR transaction select           |
+        |      |                         |                       |
+        |      |                    CSR register bank            |
         |      +---- trap candidates ----+                       |
         |                       trap qualification               |
         |                         /             \                 |
@@ -65,12 +69,13 @@ Instruction fetch and data access remain separate Harvard paths. The implemented
 | ALU | Combinational integer operation on supplied values |
 | CTRL | Combinational branch/jump evaluation, complete control-transfer next PC, jump link value, and applicable target-alignment traps |
 | LSU | Stateless fetch pass-through, data effective address, alignment, width, lane, extension semantics, memory-fault traps, and defensive invalid-uop traps |
-| CSR/SYSTEM | CSR operation semantics, exact SYSTEM interpretation, CSR-access legality, and corresponding trap candidates |
+| CSR/SYSTEM controller | Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal bank responses into trap candidates, and controller-generated CSR transactions |
+| CSR register bank | Dense physical CSR cells, architectural address dispatch, per-CSR field and reset semantics, parameterized read/write plumbing, atomic validation, and synchronous transaction commit |
 | Memory adapters | Address-map validation, local-address translation, backend timing, routing, and backend error adaptation |
 
 Execution units shall not access the register file, select destination registers, or commit architectural state. The core shall not repeat raw instruction decoding or embed the physical memory map.
 
-Trap detection is decentralized: each unit shall report only conditions within its semantic responsibility through `rv32_trap_pkg::trap_req_t`. Trap handling is centralized: the core alone shall qualify active sources, select one report, retain it, and sequence precise architectural trap entry. A unit without an architecturally meaningful exceptional condition shall not receive a trap output solely for interface symmetry.
+Trap detection is decentralized: each unit shall report only conditions within its semantic responsibility through `rv32_trap_pkg::trap_req_t`. The CSR register bank returns operation legality but is not itself an architectural trap source; the CSR/SYSTEM controller converts an illegal instruction-directed bank response into a trap candidate. Trap handling is centralized: the core alone shall qualify active sources, select one report, retain it, and sequence precise architectural trap entry. A unit without an architecturally meaningful exceptional condition shall not receive a trap output solely for interface symmetry.
 
 ## 5. State Model
 
@@ -107,8 +112,10 @@ For control-transfer instructions, CTRL shall return the complete next PC, inclu
 
 The LSU shall receive base and store-source values directly and shall calculate data effective addresses locally. All memory paths shall carry full architectural byte addresses to adapters and shall tolerate arbitrary adapter latency under the generic transaction contract. Specialist result and trap outputs are mutually exclusive candidates; the core determines the architectural exit path.
 
+All CSR mutations shall use one shared atomic register-bank transaction interface. Parent integration shall select among controller-generated Zicsr or MRET candidates, Core-generated trap entry, timer, and future extension transactions. The CSR/SYSTEM instruction controller is not a transit point for Core trap, timer, or future-extension updates.
+
 ## 8. Scope and Evolution
 
-Full privileged state, interrupts, debug, additional ISA extensions, caches, pipelining, speculation, and increased memory concurrency require separate architecture work. The current synchronous-trap boundary does not define interrupt sampling, priority, or complete privilege-stack behavior. Adding one of these features requires revision here only when it changes a responsibility boundary or abstract system invariant.
+The machine timer interrupt is the only interrupt source in the current planned scope, but its source interface, synchronization, sampling, and arbitration require a later implementation stage. Other interrupt sources, lower privilege modes, debug, additional ISA extensions, caches, pipelining, speculation, and increased memory concurrency require separate architecture work. Adding one of these features requires revision here only when it changes a responsibility boundary or abstract system invariant.
 
 Changes limited to ports, state encoding, mux structure, cycle optimization, memory-map parameters, or implementation naming belong to RTL, module contracts, or the core implementation document.

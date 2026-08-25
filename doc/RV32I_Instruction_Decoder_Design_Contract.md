@@ -131,20 +131,21 @@ The SYSTEM major opcode shall map `funct3` as follows:
 
 Structurally valid register and immediate CSR forms shall select CSR writeback, assert destination-register write intent, and select the sequential normal-PC source. The SYSTEM form shall select CSR writeback and the CSR/SYSTEM normal-PC source without destination-register write intent.
 
-The CSR/SYSTEM execution boundary shall interpret the preserved SYSTEM immediate at minimum as follows:
+The CSR/SYSTEM controller shall interpret the preserved SYSTEM immediate at minimum as follows:
 
 | `imm[11:0]` | Exact operation |
 | --- | --- |
 | `12'h000` | ECALL |
 | `12'h001` | EBREAK |
+| `12'h105` | WFI |
 | `12'h302` | MRET |
 | Other | Illegal-instruction trap |
 
-ECALL and EBREAK shall produce their defined synchronous exceptions. MRET shall produce `mepc` as its normal PC result. The main decoder shall not duplicate this exact-encoding policy.
+The CSR/SYSTEM controller also enforces the `rs1 == x0` and `rd == x0` constraints for these exact operations. ECALL and EBREAK shall produce their defined synchronous exceptions, WFI shall be a side-effect-free sequential no-op, and MRET shall produce `mepc` as its normal PC result. The main decoder shall not duplicate this exact-encoding policy.
 
 ## 9. FENCE Classification
 
-The base FENCE encoding with `funct3 = 000` shall be legal. In this implementation it is a serialization no-op: it uses no register source, writes no destination register, issues no LSU transaction, and selects `pc + 4` through the normal sequential path.
+Every MISC-MEM encoding with `funct3 = 000` shall be accepted as base FENCE, regardless of `rs1`, `rd`, `fm`, predecessor, or successor fields. This includes FENCE.TSO and PAUSE encodings. In this implementation FENCE is a serialization no-op: it uses no register source, writes no destination register, issues no LSU transaction, and selects `pc + 4` through the normal sequential path.
 
 Because FENCE has no architectural writeback value, its writeback-source field is not consumed. The implementation shall assign it a non-memory completion class so that it cannot be dispatched to the LSU.
 
@@ -158,7 +159,7 @@ The normal PC-source field is independent of writeback selection. It shall disti
 
 - sequential `pc + 4`;
 - the control-transfer unit result; and
-- the CSR/SYSTEM unit result.
+- the CSR/SYSTEM controller result.
 
 Ordinary non-control, non-SYSTEM instructions shall select the sequential source. Branches, JAL, and JALR shall select the control-transfer source. Only the structural SYSTEM form shall select the CSR/SYSTEM source at decode time.
 
@@ -175,7 +176,7 @@ Decoder verification shall show that:
 - source-usage and destination-write flags match true dependencies;
 - immediates, CSR addresses, and CSR immediate sources are reconstructed correctly;
 - CSR and SYSTEM forms receive the required operation, writeback, and PC classifications;
-- FENCE is legal and side-effect free while FENCE.I remains unsupported;
+- all base-FENCE encodings are legal and side-effect free while FENCE.I remains unsupported;
 - writeback and normal PC selection remain independent; and
 - exact SYSTEM, CSR-access, memory, and control-target legality is not duplicated in the decoder.
 
@@ -185,7 +186,7 @@ Decoder verification shall show that:
 - [Core implementation](RV32I_Core_Implementation.md)
 - [CTRL unit contract](RV32I_CTRL_Design_Contract.md)
 - [LSU contract](RV32I_LSU_Contract.md)
-- [CSR/SYSTEM contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+- [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md)
 - [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
 
 ## Metadata

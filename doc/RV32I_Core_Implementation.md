@@ -13,11 +13,12 @@ The implementation shall provide a single-issue, non-pipelined RV32I core with o
 - the ALU;
 - the control-transfer unit;
 - the LSU;
-- a CSR/SYSTEM execution boundary;
-- the shared synchronous-trap representation; and
+- a CSR/SYSTEM instruction controller;
+- a shared CSR register bank;
+- the shared architectural trap representation; and
 - separate instruction and data adapter channels.
 
-Machine interrupts, nested-trap policy, and full privilege-state transitions remain deferred. The initial trap path is a precise machine-mode synchronous-exception path.
+The initial trap path is a precise Machine-mode synchronous-exception path. The architectural CSR state required by one later machine timer interrupt is included, but the timer interface, synchronization, sampling point, and interrupt arbitration remain deferred. Other interrupt sources, lower privilege modes, and nested-trap policy remain outside the current scope.
 
 ## 2. Ownership and Module Boundaries
 
@@ -31,7 +32,7 @@ The core shall own:
 - architectural GPR commit authorization; and
 - entry into and return from the trap path.
 
-The decoder owns structural instruction classification and illegal-encoding reports. The ALU owns arithmetic and logical results and has no trap responsibility in the current RV32I scope. The control-transfer unit owns branch decisions, targets, link values, and applicable target-alignment reports. The LSU owns load/store formatting, memory-operation reports, fetch access-fault reports, and defensive invalid-uop reports. The CSR/SYSTEM boundary owns CSR semantics, exact SYSTEM legality, CSR-access reports, machine trap state, and MRET results.
+The decoder owns structural instruction classification and illegal-encoding reports. The ALU owns arithmetic and logical results and has no trap responsibility in the current RV32I scope. The control-transfer unit owns branch decisions, targets, link values, and applicable target-alignment reports. The LSU owns load/store formatting, memory-operation reports, fetch access-fault reports, and defensive invalid-uop reports. The CSR/SYSTEM controller owns Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal instruction-directed bank responses into traps, and MRET results. The CSR register bank owns physical cells, address dispatch, per-CSR field and reset semantics, transaction legality, and synchronous state commitment.
 
 Trap detection is decentralized across the units with the required semantic knowledge. Architectural trap handling remains centralized in the core. No unit may select the trap vector or mutate trap state directly because it detected a condition.
 
@@ -59,7 +60,29 @@ rv32_trap_pkg::trap_req_t trap_q;
 core_state_t state_q;
 ```
 
-The CSR/SYSTEM boundary shall retain, at minimum, `mtvec`, `mepc`, `mcause`, and `mtval`. It may retain CSR write intent and data in core-owned or unit-owned pending state, but normal CSR mutation shall remain commit-qualified.
+The CSR register bank shall dispatch the current implemented set:
+
+```text
+mstatus
+misa
+mie
+mtvec
+mstatush
+mscratch
+mepc
+mcause
+mtval
+mip
+mvendorid
+marchid
+mimpid
+mhartid
+mconfigptr
+```
+
+The bank shall use dense physical-cell indexing rather than a 4096-entry architectural-address array. Mutable state includes the required writable fields, while `misa` and identification/configuration views may be fixed and `mip.MTIP` may be hardware-driven. Unsupported fields shall be synthesized as fixed, WPRI, WARL, or WLRL values rather than generalized by the bank.
+
+The default bank interface shall provide four combinational read ports and eight synchronous write lanes. The core may retain a candidate transaction in core-owned or controller-owned pending state, but normal CSR mutation shall remain bank-commit-qualified.
 
 `trap_q` is required because source trap reports are transaction-qualified and need not remain valid after the core leaves the reporting state. On every transition into `TRAP`, the core shall capture the complete selected report before the source request is released.
 
@@ -114,24 +137,27 @@ No synchronous trap from the committing instruction shall be accepted in `COMMIT
 The core shall:
 
 - write the selected result when destination-write intent is set and `rd != x0`;
-- authorize any pending legal CSR update;
+- select any pending legal Zicsr or MRET transaction for the shared CSR bank;
+- authorize the bank's global commit only for a completely legal atomic transaction;
 - update the PC from the retained normal PC result; and
 - return to `FETCH`.
 
 ### 5.5 TRAP
 
-`TRAP` is the only state that may commit a captured synchronous exception.
+`TRAP` is the only state that may commit a captured architectural trap.
 
 Normal execution trap candidates shall not be accepted while the core is in `TRAP`.
 
-The core and CSR/SYSTEM boundary shall atomically:
+Core trap logic shall construct one atomic CSR-bank transaction that:
 
-- write the faulting instruction PC to `mepc`;
-- write `{trap_q.interrupt, trap_q.code}` to `mcause`;
-- write `trap_q.tval` to `mtval`;
-- update the PC from the supported `mtvec` trap-vector interpretation;
-- suppress GPR writeback and any pending normal CSR update; and
-- return to `FETCH`.
+- writes the synchronous faulting PC, or the later interrupt return PC selected by its sampling contract, to `mepc`;
+- writes `{trap_q.interrupt, trap_q.code}` to `mcause`;
+- writes `trap_q.tval` to `mtval`; and
+- writes `mstatus` with the prior `MIE` copied to `MPIE`, `MIE` cleared, and the M-mode-only `MPP` representation preserved.
+
+Parent integration shall present the trap transaction to the bank with priority over an ordinary Zicsr transaction. The bank shall commit all enabled trap lanes together or none of them.
+
+In the same `TRAP` transition, the core shall update the PC from `{mtvec[31:2], 2'b00}` in Direct mode, suppress GPR writeback and any pending normal CSR update, and return to `FETCH`.
 
 The initial synchronous path requires `trap_q.interrupt == 0`.
 
@@ -163,7 +189,7 @@ The decoder's PC-source class is independent of writeback selection:
 | --- | --- |
 | Sequential | `pc_q + 4` |
 | CTRL | branch or jump next PC |
-| CSR | CSR/SYSTEM next PC, including `mepc` for MRET |
+| CSR | CSR/SYSTEM next PC, including aligned `mepc` for MRET |
 
 The core shall retain the selected normal result before `COMMIT`. Trap entry overrides normal PC selection in `TRAP`; it shall not appear as a decoder PC-source encoding.
 
@@ -173,34 +199,79 @@ For memory operations, the core shall form the 32-bit wrapped sum of the retaine
 
 For a taken control transfer, CTRL shall validate the target after all instruction-specific target rules, including JALR low-bit clearing. A target that violates the core's four-byte instruction alignment shall produce `EXC_INST_ADDR_MISALIGNED` with the attempted target in `tval`. An untaken branch shall not report a target-alignment exception.
 
-## 7. CSR and SYSTEM Execution
+## 7. CSR Controller and Register Bank
 
-The CSR/SYSTEM boundary shall consume the decoded CSR operation, `imm[11:0]` CSR or SYSTEM field, five-bit immediate source, retained `rs1` value, destination index, current PC, and raw instruction where required for trap metadata. It shall expose a `rv32_trap_pkg::trap_req_t` trap candidate independently of its normal result outputs.
+### 7.1 Instruction controller
 
-For CSR read-modify-write instructions it shall:
+The implemented combinational CSR/SYSTEM controller consumes the decoded CSR operation, `imm[11:0]` CSR or SYSTEM field, five-bit immediate source, retained `rs1` value, `rd == x0` and `rs1 == x0` indicators, two bank read responses, and candidate-write legality feedback. It exposes two read addresses, the prior CSR result, one candidate write lane, an MRET PC result and validity flag, and a trap report. Detailed instruction semantics are defined by the [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md).
 
-- return the prior CSR value as the normal destination result;
-- apply CSRRW replacement semantics;
-- apply CSRRS set-bit semantics;
-- apply CSRRC clear-bit semantics;
-- suppress CSRRS or CSRRC writes when the register source is `x0`;
-- suppress CSRRSI or CSRRCI writes when the immediate source is zero; and
-- report illegal CSR addresses, privilege failures, read-only write attempts, and other unsupported CSR accesses as illegal instructions.
+For a legal Zicsr instruction, the controller shall return the prior bank read value, apply the required read/modify/write operation, and produce zero or one enabled write lane. Register and immediate set/clear forms shall suppress the write lane for zero sources as required.
 
-For `CSR_SYS`, it shall interpret `imm[11:0]` at minimum as follows:
+For `CSR_SYS`, the controller shall interpret `imm[11:0]` at minimum as follows:
 
 | `imm[11:0]` | CSR/SYSTEM outcome |
 | --- | --- |
-| `12'h000` | ECALL exception |
-| `12'h001` | EBREAK exception |
-| `12'h302` | MRET normal execution |
+| `12'h000` with `rs1 == x0`, `rd == x0` | ECALL exception |
+| `12'h001` with `rs1 == x0`, `rd == x0` | EBREAK exception |
+| `12'h105` with `rs1 == x0`, `rd == x0` | WFI sequential no-op |
+| `12'h302` with `rs1 == x0`, `rd == x0` | MRET normal execution |
 | Other | Illegal-instruction exception |
 
-Unimplemented CSR addresses, writes to read-only CSRs, insufficient privilege, unsupported CSR operations, and other CSR-access violations shall report `EXC_ILLEGAL_INST` unless a later privileged-architecture contract requires another cause.
+Nonzero `rs1` or `rd` makes an otherwise exact SYSTEM operation illegal. WFI produces no CSR side effect or controller PC redirect, so Core retains the sequential normal PC. The controller shall convert an illegal instruction-directed bank response into `EXC_ILLEGAL_INST`. It shall not duplicate the bank's address dispatch or per-CSR field semantics.
 
-Ordinary register and immediate Zicsr operations shall use CSR writeback with the sequential normal-PC source and shall clear trap validity. `CSR_SYS` shall use the CSR/SYSTEM normal-PC source, but an ECALL, EBREAK, or illegal exact SYSTEM encoding shall report a trap before that normal result can commit. MRET shall return `mepc` through the normal CSR PC path.
+### 7.2 Register-bank structure
 
-The initial machine-mode-only MRET behavior does not imply full `mstatus` or privilege-stack semantics. Those semantics shall be added with the later privilege and interrupt stage.
+The shared bank shall default to:
+
+```systemverilog
+parameter int unsigned ReadPorts  = 4;
+parameter int unsigned WritePorts = 8;
+```
+
+All read ports shall be combinational and shall observe one pre-edge snapshot. The write lanes shall form one synchronous atomic transaction. Zero enabled lanes perform no update; one lane provides the ordinary Zicsr case; multiple lanes commit together.
+
+Before commitment, the bank shall dispatch and validate every enabled lane. The complete transaction is legal only when every enabled operation is legal and no two lanes resolve to the same physical CSR cell. Duplicate-cell writes are an interface violation and shall not be resolved by lane priority. The global transaction commit remains distinct from each lane's semantic write request.
+
+The bank shall use dense implemented-cell storage rather than a 4096-by-32 architectural-address array. One reusable dispatcher shall map each architectural address to a per-CSR semantic function and physical index. Per-CSR functions shall compute legality, architectural read data, and candidate next state without committing storage. The bank alone shall update physical cells in sequential logic.
+
+Per-CSR reset behavior shall reside with the corresponding semantic function. During reset, the bank shall dispatch internal requests with `rst_en` set and load all returned next states through its generic reset branch.
+
+Complete topology, field vocabulary, and address-set requirements are defined by the [CSR register-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md).
+
+### 7.3 Transaction producers and selection
+
+All CSR state mutation shall use the same bank transaction interface:
+
+| Producer | Transaction shape |
+| --- | --- |
+| Zicsr controller | Zero or one enabled lane |
+| Core trap logic | Atomic writes to `mstatus`, `mepc`, `mcause`, and `mtval` |
+| CSR/SYSTEM controller during MRET | Atomic `mstatus` restoration |
+| Machine timer logic | Hardware-owned pending-state update or view |
+| Future extension logic | Extension-defined atomic transaction |
+
+Parent integration shall select the transaction source presented to the bank. The CSR/SYSTEM instruction controller is not a mandatory path for Core trap, timer, or future extension writes. A trap-entry transaction shall take precedence over any retained normal Zicsr or MRET candidate. Zicsr and MRET are mutually exclusive outcomes of one selected controller operation.
+
+The register bank is not an architectural trap engine. It returns legality; the selected instruction or event controller determines whether an illegal response becomes a trap report or an integration assertion.
+
+### 7.4 Current architectural behavior
+
+`mtvec` shall support Direct mode only, and `mepc` shall constrain bits 1:0 to zero for fixed `IALIGN=32`.
+
+Successful MRET shall select aligned `mepc` as the normal PC and atomically request:
+
+```text
+mstatus.MIE   <- mstatus.MPIE
+mstatus.MPIE  <- 1
+```
+
+The M-mode-only `MPP` view shall remain fixed as Machine mode (`2'b11`) through its per-CSR function.
+
+The later machine timer interrupt becomes eligible only when `mstatus.MIE`, `mie.MTIE`, and hardware-driven `mip.MTIP` are all set. Eligibility does not define the timer input interface or the core interrupt-sampling point.
+
+### 7.5 Current module evidence
+
+The CSR register bank passes its **6/6** dedicated regression, the CSR/SYSTEM controller passes its **6/6** dedicated regression, and the standalone controller/bank wrapper passes its **2/2** integration regression. These results freeze both CSR modules for Core integration. They do not yet establish complete `rv32_core` integration or architectural compliance.
 
 ## 8. Trap Sourcing and Precision
 
@@ -215,7 +286,7 @@ The source model is:
 | CTRL report | Taken instruction-target misalignment | CTRL-class instruction in `EXECUTE` |
 | CSR/SYSTEM report | ECALL, EBREAK, exact SYSTEM illegality, and CSR-access legality | CSR-class instruction in `EXECUTE` |
 | Data-side LSU report | Alignment fault, access fault, or defensive invalid LSU uop | Active data completion in `LSU_WAIT` |
-| Future interrupt report | Deferred asynchronous policy | Future architecturally defined sampling point |
+| Machine timer interrupt report | Later `MIE && MTIE && MTIP` interrupt path | Deferred architecturally defined sampling point |
 
 The ALU has no architecturally meaningful trap condition in the current RV32I scope and shall not receive a trap output merely for symmetry.
 
@@ -248,19 +319,19 @@ Required report outcomes include:
 | Decoder illegal or unsupported encoding | `EXC_ILLEGAL_INST` | Raw retained instruction |
 | CTRL taken target misaligned | `EXC_INST_ADDR_MISALIGNED` | Attempted target |
 | LSU invalid micro-operation | `EXC_ILLEGAL_INST` | Zero |
-| CSR/SYSTEM illegal exact encoding or access | `EXC_ILLEGAL_INST` | CSR/SYSTEM policy context |
-| CSR/SYSTEM breakpoint | `EXC_BREAKPOINT` | Retained PC and raw instruction |
-| CSR/SYSTEM environment call from machine mode | `EXC_ECALL_MMODE` | Retained PC and raw instruction |
+| CSR/SYSTEM illegal exact encoding or access | `EXC_ILLEGAL_INST` | Zero |
+| CSR/SYSTEM breakpoint | `EXC_BREAKPOINT` | Zero |
+| CSR/SYSTEM environment call from machine mode | `EXC_ECALL_M` | Zero |
 
-Other LSU cause and `tval` semantics are defined by the LSU contract. Exact CSR/SYSTEM `tval` values remain part of the execution-environment and privileged-architecture policy; the unit shall retain sufficient context to implement that policy without changing the common event boundary.
+Other LSU cause and `tval` semantics are defined by the LSU contract. The frozen CSR/SYSTEM controller reports zero `tval` for its current synchronous exception set.
 
-The same core intake model shall accommodate a future interrupt arbiter using the common representation. Interrupt sampling, arbitration, and priority relative to synchronous exceptions remain deferred.
+The same core intake model shall accommodate the later machine timer interrupt report. On an accepted interrupt, `mepc` shall capture the instruction address that would otherwise execute next under the eventual sampling contract. Timer synchronization, sampling, and priority relative to synchronous exceptions remain deferred; other interrupt sources are not part of the frozen initial scope.
 
 For the selected execution boundary, a successful result and an accepted trap are mutually exclusive architectural outcomes. Success advances toward `COMMIT`; failure advances toward `TRAP`, and any simultaneously present normal result is ignored.
 
-A captured synchronous exception is precise when:
+A captured architectural trap is precise when:
 
-- `mepc` identifies the faulting instruction;
+- `mepc` identifies the synchronous faulting instruction or the instruction that would have executed next after an accepted interrupt;
 - no GPR or normal CSR update from that instruction occurs;
 - no normal next-PC result is committed; and
 - `mcause` and `mtval` describe the selected report.
@@ -276,6 +347,10 @@ The implementation shall preserve these invariants:
 - `pc_q` changes only on reset, `COMMIT`, or `TRAP`;
 - normal GPR and instruction-directed CSR writes occur only in `COMMIT`;
 - trap-state CSR writes occur only in `TRAP`;
+- trap-entry side effects take precedence over every retained normal CSR candidate;
+- all physical CSR-cell mutation occurs only in the register bank's sequential logic;
+- every selected CSR transaction is all-or-nothing, contains only legal lanes, and contains no duplicate physical-cell target;
+- `mtvec` remains Direct and `mepc[1:0]` remains zero;
 - `COMMIT` and `TRAP` are mutually exclusive outcomes for an instruction;
 - pending LSU request fields remain stable until completion;
 - a trapped instruction performs no later normal commit; and
@@ -285,16 +360,24 @@ The implementation shall preserve these invariants:
 
 Reset shall place the core in `FETCH`, initialize the PC from the configured reset vector, clear pending write and trap intent, and initialize machine trap state to documented implementation values.
 
+The CSR register bank shall obtain each implemented cell's reset state by dispatching an internal `rst_en` request to that cell's semantic function and shall load all returned values through its generic synchronous reset branch.
+
 No GPR write, CSR write, or data-memory request may occur solely because reset is asserted or released.
 
 ## 11. Verification Obligations
 
-Core-level verification shall cover:
+The direct CSR register-bank, CSR/SYSTEM controller, and controller/bank wrapper regressions are complete as recorded in Section 7.5. Core-level verification shall cover:
 
 - reset and first fetch;
 - all normal state transitions;
 - request retention under instruction and data backpressure;
 - ALU, immediate, control, load, store, CSR, SYSTEM, and FENCE paths;
+- complete architectural views and write policies for `mstatus`, `misa`, `mie`, `mtvec`, `mstatush`, `mscratch`, `mepc`, `mcause`, `mtval`, `mip`, `mvendorid`, `marchid`, `mimpid`, `mhartid`, and `mconfigptr`;
+- four independent combinational CSR reads observing one bank snapshot;
+- zero-, one-, and multi-lane cases across the eight-lane atomic CSR write interface;
+- all-or-nothing rejection of illegal lanes and duplicate physical-cell writes;
+- dispatch fall-through for every unimplemented CSR address;
+- per-CSR reset dispatch and generic bank reset commitment;
 - decoder-owned illegal-encoding reports with raw-instruction `tval`;
 - decoder-trap precedence over every specialist unit;
 - rejection of inactive or wrong-state trap candidates;
@@ -303,7 +386,10 @@ Core-level verification shall cover:
 - no destination write for stores, branches, SYSTEM operations, FENCE, or trapped instructions;
 - illegal-instruction, breakpoint, environment-call, instruction-target, instruction-access, load, and store trap causes;
 - exact `mepc` and `mcause` updates and faithful `mtval` capture from each report;
-- trap-vector PC selection and MRET return through distinct paths;
+- Direct `mtvec` trap-vector selection and four-byte-aligned `mepc` behavior;
+- exact `mstatus.MIE` and `mstatus.MPIE` transitions on trap entry and MRET;
+- `mie.MTIE` and hardware-driven `mip.MTIP` views and timer eligibility;
+- successful MRET return and `mstatus` commitment as one selected normal controller outcome;
 - suppression of normal CSR writes when a CSR operation traps;
 - local LSU trap completion without a DMEM request;
 - defensive invalid-LSU-uop completion with `EXC_ILLEGAL_INST` and zero `tval`;
@@ -314,26 +400,22 @@ Assertions should encode the state, stability, commit, trap exclusivity, and tra
 
 ## 12. Implementation Sequence
 
-Recommended implementation order:
+The shared CSR packages, dense register bank, per-CSR semantics, atomic interface, reset dispatch, and CSR/SYSTEM controller are implemented and pass their direct regressions. Remaining implementation order is:
 
-1. stabilize shared instruction and trap package types without a semantic legality field;
-2. complete decoder CSR, SYSTEM, FENCE, and encoding-trap semantics;
-3. implement and unit-test the CSR/SYSTEM boundary;
-4. implement the five-state core controller and retained datapath;
-5. integrate state-qualified decoder, LSU, CSR/SYSTEM, and control-target trap reports;
-6. add focused core-level tests for normal and exceptional flows; and
-7. add a small integration program covering load, store, branch, CSR, trap entry, and MRET.
+1. implement the five-state core controller, retained datapath, and CSR transaction-source selection;
+2. integrate state-qualified decoder, LSU, CSR/SYSTEM, and control-target trap reports;
+3. add focused core-level tests for normal, exceptional, and compound CSR-update flows;
+4. add a small integration program covering load, store, branch, CSR, trap entry, and MRET; and
+5. add the machine timer source, synchronization, eligibility, and sampling contract after the synchronous path is stable.
 
 ## 13. Deferred Decisions
 
 The following remain explicit follow-up decisions:
 
 - exact top-level naming and reset-vector configuration;
-- CSR reset values and WARL behavior, including supported `mtvec` modes;
-- CSR/SYSTEM `tval` values for illegal accesses, breakpoints, and environment calls;
-- the implemented CSR address set beyond `mtvec`, `mepc`, `mcause`, and `mtval`;
-- full `mstatus`, privilege-stack, and nested-trap semantics;
-- interrupt inputs, synchronization, arbitration, and priority; and
+- the machine timer peripheral interface, synchronization, sampling point, arbitration, and priority;
+- `mcycle`, `minstret`, their RV32 high halves, and associated `mcountinhibit` behavior after commit/retirement signaling is stable;
+- any later interrupt sources, lower privilege modes, and nested-trap policy; and
 - implementation-specific memory backend selection outside the core.
 
 ## Module Contracts
@@ -342,14 +424,15 @@ The following remain explicit follow-up decisions:
 - [Instruction decoder contract](RV32I_Instruction_Decoder_Design_Contract.md)
 - [CTRL unit contract](RV32I_CTRL_Design_Contract.md)
 - [LSU contract](RV32I_LSU_Contract.md)
-- [CSR/SYSTEM contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+- [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+- [CSR register-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md)
 - [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
 - [Exceptions, traps, and extensions roadmap](RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 
 ## Metadata
 
 - Document type: implementation contract
-- Scope: planned `rv32_core` controller, datapath, CSR/SYSTEM, and synchronous-trap integration
+- Scope: planned `rv32_core` controller, datapath, CSR/SYSTEM controller, CSR register bank, and trap integration
 - Architectural authority: [RV32I Core Architecture](RV32I_Core_Architecture.md)
 - Interface authority: package definitions and module RTL
 - Verification authority: module and core integration tests
