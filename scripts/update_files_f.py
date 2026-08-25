@@ -11,7 +11,15 @@ def build_manifest_entries(repo_root: Path, source_dir: Path) -> list[str]:
     for path in source_dir.rglob("*.sv"):
         rel = path.relative_to(repo_root).as_posix()
         entries.append(rel)
-    entries.sort()
+    # Compile type declarations before their consumers. Implementation packages
+    # follow the base packages they import (for example csr_impl -> csr).
+    entries.sort(
+        key=lambda entry: (
+            0 if "/type/" in entry else 1,
+            1 if entry.endswith("_impl_pkg.sv") else 0,
+            entry,
+        )
+    )
     return entries
 
 

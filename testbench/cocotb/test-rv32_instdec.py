@@ -441,7 +441,13 @@ DIRECTED_CASES = (
     ("jal", encode_j(-1 << 20, 3)),
     ("jalr", encode_i(2047, 17, 0, 3, 0b1100111)),
     ("fence", 0x0FF0000F),
+    ("fence_nonzero_registers", encode_i(0x0FF, 17, 0, 3, 0b0001111)),
+    ("fence_reserved_fm", encode_i(0xF33, 0, 0, 0, 0b0001111)),
+    ("fence_empty_masks", 0x0000000F),
+    ("fence_tso", 0x8330000F),
+    ("pause", 0x0100000F),
     ("system", encode_i(0x302, 0, CSR_SYS, 0, 0b1110011)),
+    ("wfi", encode_i(0x105, 0, CSR_SYS, 0, 0b1110011)),
     *(
         (name, encode_i(0xC00, 17, f3, 3, 0b1110011))
         for name, f3 in (
@@ -456,7 +462,7 @@ DIRECTED_CASES = (
 )
 
 
-assert len(DIRECTED_CASES) == 45
+assert len(DIRECTED_CASES) == 51
 
 
 def make_instruction_test(name, inst):
