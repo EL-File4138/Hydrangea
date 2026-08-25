@@ -555,7 +555,6 @@ check-vivado:
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
-	rm -rf $(FORMAL_DIR)/*/
 	rm -rf __pycache__
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	find . -type f \( \
