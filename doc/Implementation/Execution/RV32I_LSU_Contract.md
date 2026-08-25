@@ -2,11 +2,13 @@
 
 **Scope:** Instruction-fetch pass-through and RV32I load/store semantics
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+**Execution environment:** [RV32I Execution-Environment Contract](../../Philosophy/RV32I_Execution_Environment_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**Memory contract:** [RV32I Memory Subsystem Design Contract](RV32I_Memory_Subsystem_Design_Contract.md)
+**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+
+**Memory contract:** [RV32I Memory Subsystem Design Contract](../IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
 ## 1. Purpose
 

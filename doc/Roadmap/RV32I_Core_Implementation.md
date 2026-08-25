@@ -15,6 +15,7 @@ The implementation shall provide a single-issue, non-pipelined RV32I core with o
 - the LSU;
 - a CSR/SYSTEM instruction controller;
 - a shared CSR register bank;
+- a dedicated combinational trap-entry controller;
 - the shared architectural trap representation; and
 - separate instruction and data adapter channels.
 
@@ -32,7 +33,7 @@ The core shall own:
 - architectural GPR commit authorization; and
 - entry into and return from the trap path.
 
-The decoder owns structural instruction classification and illegal-encoding reports. The ALU owns arithmetic and logical results and has no trap responsibility in the current RV32I scope. The control-transfer unit owns branch decisions, targets, link values, and applicable target-alignment reports. The LSU owns load/store formatting, memory-operation reports, fetch access-fault reports, and defensive invalid-uop reports. The CSR/SYSTEM controller owns Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal instruction-directed bank responses into traps, and MRET results. The CSR register bank owns physical cells, address dispatch, per-CSR field and reset semantics, transaction legality, and synchronous state commitment.
+The decoder owns structural instruction classification and illegal-encoding reports. The ALU owns arithmetic and logical results and has no trap responsibility in the current RV32I scope. The control-transfer unit owns branch decisions, targets, link values, and applicable target-alignment reports. The LSU owns load/store formatting, memory-operation reports, fetch access-fault reports, and defensive invalid-uop reports. The CSR/SYSTEM controller owns Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal instruction-directed bank responses into traps, and MRET results. The CSR register bank owns physical cells, address dispatch, per-CSR field and reset semantics, transaction legality, and synchronous state commitment. `rv32_trap` owns the combinational machine trap-entry CSR and PC candidates from a retained trap report.
 
 Trap detection is decentralized across the units with the required semantic knowledge. Architectural trap handling remains centralized in the core. No unit may select the trap vector or mutate trap state directly because it detected a condition.
 
@@ -42,7 +43,7 @@ No execution unit may write the PC or register file directly.
 
 The core shall expose clock and reset plus one instruction-side and one data-side adapter interface. The preferred integration form uses `rv32_mem_if` modports so the LSU remains the sole core-side memory client.
 
-Exact top-level port names and reset-vector configuration remain RTL decisions. The interface shall preserve the architectural address convention defined by the memory subsystem contract.
+Exact top-level port names and reset-vector parameter plumbing remain RTL decisions. On reset, the PC shall take the configured, aligned, fetchable `ResetVector`; its numerical value is resolved by the active build profile rather than frozen as a Core invariant. RTL parameters, linker/startup configuration, and the boot path shall agree under the [execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md). The interface shall preserve the architectural address convention defined by the memory subsystem contract.
 
 ## 4. Persistent State
 
@@ -59,6 +60,8 @@ logic [31:0] normal_pc_q;
 rv32_trap_pkg::trap_req_t trap_q;
 core_state_t state_q;
 ```
+
+The [Core-owned state contract](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md) governs the lifetime and update boundaries of this retained state. The [register-file contract](../Implementation/State/RV32I_Register_File_Design_Contract.md) separately governs architectural GPR cells.
 
 The CSR register bank shall dispatch the current implemented set:
 
@@ -148,16 +151,16 @@ The core shall:
 
 Normal execution trap candidates shall not be accepted while the core is in `TRAP`.
 
-Core trap logic shall construct one atomic CSR-bank transaction that:
+[`rv32_trap`](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md) shall consume `trap_q`, the retained instruction PC, legal read responses for `mstatus` and `mtvec`, and legality feedback for four candidate write lanes. For a valid trap with legal reads, it shall construct the candidate transaction:
 
 - writes the synchronous faulting PC, or the later interrupt return PC selected by its sampling contract, to `mepc`;
 - writes `{trap_q.interrupt, trap_q.code}` to `mcause`;
 - writes `trap_q.tval` to `mtval`; and
-- writes `mstatus` with the prior `MIE` copied to `MPIE`, `MIE` cleared, and the M-mode-only `MPP` representation preserved.
+- writes `mstatus` with the prior `MIE` copied to `MPIE`, `MIE` cleared, and `MPP` set to Machine mode (`2'b11`).
 
-Parent integration shall present the trap transaction to the bank with priority over an ordinary Zicsr transaction. The bank shall commit all enabled trap lanes together or none of them.
+`rv32_trap` shall form the Direct-mode target `{mtvec[31:2], 2'b00}`. For a valid trap, it shall assert both `legal_o` and `pc_valid_o` only when both read responses and all four candidate write lanes are legal. A missing read legality response shall suppress the candidate transaction; a rejected write lane may leave the candidate fields visible for diagnosis but shall prevent trap acceptance. Parent integration shall present an accepted trap transaction to the bank with priority over an ordinary Zicsr transaction. The bank shall commit all enabled trap lanes together or none of them.
 
-In the same `TRAP` transition, the core shall update the PC from `{mtvec[31:2], 2'b00}` in Direct mode, suppress GPR writeback and any pending normal CSR update, and return to `FETCH`.
+In the same `TRAP` transition, the core shall update the PC from `rv32_trap.pc_o` only when `rv32_trap.pc_valid_o` is asserted, suppress GPR writeback and any pending normal CSR update, and return to `FETCH`.
 
 The initial synchronous path requires `trap_q.interrupt == 0`.
 
@@ -203,7 +206,7 @@ For a taken control transfer, CTRL shall validate the target after all instructi
 
 ### 7.1 Instruction controller
 
-The implemented combinational CSR/SYSTEM controller consumes the decoded CSR operation, `imm[11:0]` CSR or SYSTEM field, five-bit immediate source, retained `rs1` value, `rd == x0` and `rs1 == x0` indicators, two bank read responses, and candidate-write legality feedback. It exposes two read addresses, the prior CSR result, one candidate write lane, an MRET PC result and validity flag, and a trap report. Detailed instruction semantics are defined by the [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md).
+The implemented combinational CSR/SYSTEM controller consumes the decoded CSR operation, `imm[11:0]` CSR or SYSTEM field, five-bit immediate source, retained `rs1` value, `rd == x0` and `rs1 == x0` indicators, two bank read responses, and candidate-write legality feedback. It exposes two read addresses, the prior CSR result, one candidate write lane, an MRET PC result and validity flag, and a trap report. Detailed instruction semantics are defined by the [CSR/SYSTEM controller contract](../Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md).
 
 For a legal Zicsr instruction, the controller shall return the prior bank read value, apply the required read/modify/write operation, and produce zero or one enabled write lane. Register and immediate set/clear forms shall suppress the write lane for zero sources as required.
 
@@ -236,7 +239,7 @@ The bank shall use dense implemented-cell storage rather than a 4096-by-32 archi
 
 Per-CSR reset behavior shall reside with the corresponding semantic function. During reset, the bank shall dispatch internal requests with `rst_en` set and load all returned next states through its generic reset branch.
 
-Complete topology, field vocabulary, and address-set requirements are defined by the [CSR register-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md).
+Complete topology, field vocabulary, and address-set requirements are defined by the [CSR register-bank contract](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md).
 
 ### 7.3 Transaction producers and selection
 
@@ -245,7 +248,7 @@ All CSR state mutation shall use the same bank transaction interface:
 | Producer | Transaction shape |
 | --- | --- |
 | Zicsr controller | Zero or one enabled lane |
-| Core trap logic | Atomic writes to `mstatus`, `mepc`, `mcause`, and `mtval` |
+| `rv32_trap` | Atomic candidate writes to `mstatus`, `mepc`, `mcause`, and `mtval` |
 | CSR/SYSTEM controller during MRET | Atomic `mstatus` restoration |
 | Machine timer logic | Hardware-owned pending-state update or view |
 | Future extension logic | Extension-defined atomic transaction |
@@ -271,7 +274,7 @@ The later machine timer interrupt becomes eligible only when `mstatus.MIE`, `mie
 
 ### 7.5 Current module evidence
 
-The CSR register bank passes its **6/6** dedicated regression, the CSR/SYSTEM controller passes its **6/6** dedicated regression, and the standalone controller/bank wrapper passes its **2/2** integration regression. These results freeze both CSR modules for Core integration. They do not yet establish complete `rv32_core` integration or architectural compliance.
+The ALU passes its **15/15** module regression, the register file passes **6/6**, and `rv32_trap` passes **4/4**. The CSR register bank passes its **6/6** dedicated regression, the CSR/SYSTEM controller passes its **6/6** dedicated regression, and the standalone controller/bank wrapper passes its **2/2** integration regression. These results establish the module boundaries for Core integration; they do not yet establish complete `rv32_core` integration or architectural compliance.
 
 ## 8. Trap Sourcing and Precision
 
@@ -366,7 +369,7 @@ No GPR write, CSR write, or data-memory request may occur solely because reset i
 
 ## 11. Verification Obligations
 
-The direct CSR register-bank, CSR/SYSTEM controller, and controller/bank wrapper regressions are complete as recorded in Section 7.5. Core-level verification shall cover:
+The direct CSR register-bank, CSR/SYSTEM controller, controller/bank wrapper, and trap-controller regressions are complete as recorded in their respective contracts and tests. Core-level verification shall cover:
 
 - reset and first fetch;
 - all normal state transitions;
@@ -387,6 +390,7 @@ The direct CSR register-bank, CSR/SYSTEM controller, and controller/bank wrapper
 - illegal-instruction, breakpoint, environment-call, instruction-target, instruction-access, load, and store trap causes;
 - exact `mepc` and `mcause` updates and faithful `mtval` capture from each report;
 - Direct `mtvec` trap-vector selection and four-byte-aligned `mepc` behavior;
+- trap-controller rejection when either required read or any required write lane is illegal;
 - exact `mstatus.MIE` and `mstatus.MPIE` transitions on trap entry and MRET;
 - `mie.MTIE` and hardware-driven `mip.MTIP` views and timer eligibility;
 - successful MRET return and `mstatus` commitment as one selected normal controller outcome;
@@ -400,7 +404,7 @@ Assertions should encode the state, stability, commit, trap exclusivity, and tra
 
 ## 12. Implementation Sequence
 
-The shared CSR packages, dense register bank, per-CSR semantics, atomic interface, reset dispatch, and CSR/SYSTEM controller are implemented and pass their direct regressions. Remaining implementation order is:
+The shared CSR packages, dense register bank, per-CSR semantics, atomic interface, reset dispatch, CSR/SYSTEM controller, and combinational trap-entry controller are implemented and directly tested. Remaining implementation order is:
 
 1. implement the five-state core controller, retained datapath, and CSR transaction-source selection;
 2. integrate state-qualified decoder, LSU, CSR/SYSTEM, and control-target trap reports;
@@ -412,7 +416,7 @@ The shared CSR packages, dense register bank, per-CSR semantics, atomic interfac
 
 The following remain explicit follow-up decisions:
 
-- exact top-level naming and reset-vector configuration;
+- exact top-level naming, reset wiring, profile-configuration source, and parameter plumbing; each active profile resolves the concrete reset-vector value;
 - the machine timer peripheral interface, synchronization, sampling point, arbitration, and priority;
 - `mcycle`, `minstret`, their RV32 high halves, and associated `mcountinhibit` behavior after commit/retirement signaling is stable;
 - any later interrupt sources, lower privilege modes, and nested-trap policy; and
@@ -420,19 +424,25 @@ The following remain explicit follow-up decisions:
 
 ## Module Contracts
 
-- [Core architecture](RV32I_Core_Architecture.md)
-- [Instruction decoder contract](RV32I_Instruction_Decoder_Design_Contract.md)
-- [CTRL unit contract](RV32I_CTRL_Design_Contract.md)
-- [LSU contract](RV32I_LSU_Contract.md)
-- [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md)
-- [CSR register-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md)
-- [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
+- [Core architecture](../Philosophy/RV32I_Core_Architecture.md)
+- [Execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md)
+- [Execution-environment deferred decisions](../Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md)
+- [Instruction decoder contract](../Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md)
+- [Trap controller contract](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md)
+- [ALU contract](../Implementation/Execution/RV32I_ALU_Design_Contract.md)
+- [CTRL unit contract](../Implementation/Execution/RV32I_CTRL_Design_Contract.md)
+- [LSU contract](../Implementation/Execution/RV32I_LSU_Contract.md)
+- [CSR/SYSTEM controller contract](../Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
+- [Register-file contract](../Implementation/State/RV32I_Register_File_Design_Contract.md)
+- [Core-owned state contract](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md)
+- [CSR register-bank contract](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md)
+- [Memory subsystem contract](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
 - [Exceptions, traps, and extensions roadmap](RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 
 ## Metadata
 
 - Document type: implementation contract
 - Scope: planned `rv32_core` controller, datapath, CSR/SYSTEM controller, CSR register bank, and trap integration
-- Architectural authority: [RV32I Core Architecture](RV32I_Core_Architecture.md)
+- Architectural authority: [RV32I Core Architecture](../Philosophy/RV32I_Core_Architecture.md)
 - Interface authority: package definitions and module RTL
 - Verification authority: module and core integration tests

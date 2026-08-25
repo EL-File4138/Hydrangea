@@ -2,9 +2,9 @@
 
 **Scope:** Architectural branch and jump execution
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+**Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
 
 ## 1. Purpose
 

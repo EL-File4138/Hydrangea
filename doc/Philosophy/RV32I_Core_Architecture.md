@@ -2,11 +2,13 @@
 
 **Scope:** System structure and architectural ownership for the baseline RV32I core
 
-**Module contracts:** [Instruction Decoder](RV32I_Instruction_Decoder_Design_Contract.md), [CTRL](RV32I_CTRL_Design_Contract.md), [LSU](RV32I_LSU_Contract.md), [CSR/SYSTEM Controller](RV32I_CSR_SYSTEM_Design_Contract.md), [CSR Register Bank](RV32I_CSR_Register_Bank_Design_Contract.md), and [Memory Subsystem](RV32I_Memory_Subsystem_Design_Contract.md)
+**Execution environment:** [RV32I Execution-Environment Contract](RV32I_Execution_Environment_Contract.md)
 
-**Implementation plan:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**Module contracts:** [Instruction Decoder](../Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md), [Trap Controller](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md), [ALU](../Implementation/Execution/RV32I_ALU_Design_Contract.md), [CTRL](../Implementation/Execution/RV32I_CTRL_Design_Contract.md), [LSU](../Implementation/Execution/RV32I_LSU_Contract.md), [CSR/SYSTEM Controller](../Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md), [Register File](../Implementation/State/RV32I_Register_File_Design_Contract.md), [Core-Owned State](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md), [CSR Register Bank](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md), and [Memory Subsystem](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
-**Architecture roadmap:** [Exceptions, Traps, and Extensions](RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+**Implementation plan:** [RV32I Core Implementation](../Roadmap/RV32I_Core_Implementation.md)
+
+**Architecture roadmap:** [Exceptions, Traps, and Extensions](../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 
 ## 1. Purpose
 
@@ -41,41 +43,44 @@ The core shall use one synchronous clock for persistent state. Completion, error
         |      |                  /    |    |     \               |
         |      |                ALU  CTRL  LSU  CSR/SYSTEM       |
         |      |                  \    |    |     /               |
-        |      |                   pending results               |
+        |      |                   pending results ----> COMMIT  |
         |      |                         |                       |
         |      |               CSR transaction select           |
         |      |                         |                       |
         |      |                    CSR register bank            |
-        |      +---- trap candidates ----+                       |
-        |                       trap qualification               |
-        |                         /             \                 |
-        |                      COMMIT           TRAP              |
+        |      +---- trap candidates --> qualification           |
+        |                                    |                   |
+        |                                rv32_trap ----> TRAP    |
         +----------+----------------------+----------------------+
                    |                      |
-             IMEM adapter            DMEM adapter
+           logical IMEM path      logical DMEM path
                    |                      |
-          instruction backend      data/MMIO backend
+                   +---- profile-defined adapter/mapping ----+
+                                      |
+                         one or more physical backends
 ```
 
-Instruction fetch and data access remain separate Harvard paths. The implemented LSU hosts the fetch path as a pass-through and the data path as an ISA-semantic translator. Each path terminates at a required memory adapter before reaching a physical backend.
+Instruction fetch and data access remain logically separate Harvard paths at the Core boundary. The implemented LSU hosts the fetch path as a pass-through and the data path as an ISA-semantic translator. Each transaction crosses a profile-defined adapter layer before reaching a backend. A profile may map both paths onto one shared physical memory or preserve separate instruction and data backends; physical topology is not a Core invariant.
 
 ## 4. Responsibility Boundaries
 
 | Component | Architectural responsibility |
 | --- | --- |
 | Core | Instruction lifetime, PC and IR ownership, register-file access, execution scheduling, pending results, memory-request lifetime, trap-source qualification and arbitration, and architectural commit or trap entry |
+| Core-owned state | Retained instruction identity, operands, pending normal effects, memory-request fields, selected trap report, and FSM state |
 | Instruction decoder | Translation from instruction bits to semantic fields and reporting of illegal or unsupported encodings |
 | Register file | Architectural GPR storage and preservation of `x0` |
 | ALU | Combinational integer operation on supplied values |
 | CTRL | Combinational branch/jump evaluation, complete control-transfer next PC, jump link value, and applicable target-alignment traps |
 | LSU | Stateless fetch pass-through, data effective address, alignment, width, lane, extension semantics, memory-fault traps, and defensive invalid-uop traps |
 | CSR/SYSTEM controller | Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal bank responses into trap candidates, and controller-generated CSR transactions |
+| Trap controller | Combinational construction and legality qualification of machine trap-entry CSR and Direct-mode PC candidates from a retained report |
 | CSR register bank | Dense physical CSR cells, architectural address dispatch, per-CSR field and reset semantics, parameterized read/write plumbing, atomic validation, and synchronous transaction commit |
 | Memory adapters | Address-map validation, local-address translation, backend timing, routing, and backend error adaptation |
 
 Execution units shall not access the register file, select destination registers, or commit architectural state. The core shall not repeat raw instruction decoding or embed the physical memory map.
 
-Trap detection is decentralized: each unit shall report only conditions within its semantic responsibility through `rv32_trap_pkg::trap_req_t`. The CSR register bank returns operation legality but is not itself an architectural trap source; the CSR/SYSTEM controller converts an illegal instruction-directed bank response into a trap candidate. Trap handling is centralized: the core alone shall qualify active sources, select one report, retain it, and sequence precise architectural trap entry. A unit without an architecturally meaningful exceptional condition shall not receive a trap output solely for interface symmetry.
+Trap detection is decentralized: each unit shall report only conditions within its semantic responsibility through `rv32_trap_pkg::trap_req_t`. The CSR register bank returns operation legality but is not itself an architectural trap source; the CSR/SYSTEM controller converts an illegal instruction-directed bank response into a trap candidate. Trap handling is centralized: Core qualifies active sources, selects and retains one report, then uses `rv32_trap` to construct the machine trap-entry CSR and PC candidates. Core alone authorizes atomic bank commitment and exceptional PC update. A unit without an architecturally meaningful exceptional condition shall not receive a trap output solely for interface symmetry.
 
 ## 5. State Model
 

@@ -182,16 +182,17 @@ Decoder verification shall show that:
 
 ## Module Contracts
 
-- [Core architecture](RV32I_Core_Architecture.md)
-- [Core implementation](RV32I_Core_Implementation.md)
-- [CTRL unit contract](RV32I_CTRL_Design_Contract.md)
-- [LSU contract](RV32I_LSU_Contract.md)
-- [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md)
-- [Memory subsystem contract](RV32I_Memory_Subsystem_Design_Contract.md)
+- [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
+- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [ALU contract](../Execution/RV32I_ALU_Design_Contract.md)
+- [CTRL unit contract](../Execution/RV32I_CTRL_Design_Contract.md)
+- [LSU contract](../Execution/RV32I_LSU_Contract.md)
+- [CSR/SYSTEM controller contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
+- [Memory subsystem contract](../IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
 ## Metadata
 
 - Document type: module contract
 - Authority: semantic interpretation of `rv32_instdec`
-- RTL authority: `rtl/core/inst/rv32_instdec.sv`, `rtl/core/type/rv32_inst_pkg.sv`
+- RTL authority: `rtl/core/ctrl/rv32_instdec.sv`, `rtl/core/type/rv32_inst_pkg.sv`
 - Verification authority: decoder unit tests and core integration tests

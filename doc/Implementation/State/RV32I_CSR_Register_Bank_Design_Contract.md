@@ -4,11 +4,11 @@
 
 **Status:** Implemented, regression-tested, and frozen for Core integration
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+**Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**CSR controller:** [RV32I CSR/SYSTEM Design Contract](RV32I_CSR_SYSTEM_Design_Contract.md)
+**CSR controller:** [RV32I CSR/SYSTEM Design Contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
 
 ## 1. Purpose
 
@@ -114,7 +114,7 @@ All CSR writes use the same bank transaction interface, but not all writes must 
 Examples:
 
 - Zicsr writes are produced by the CSR instruction controller;
-- trap-entry writes may be produced directly by Core trap logic;
+- trap-entry candidates are produced by `rv32_trap`;
 - MRET-related `mstatus` updates are produced by the CSR/SYSTEM controller;
 - future extension logic may construct its own atomic read/write transactions.
 
@@ -592,11 +592,13 @@ The following invariants are frozen by this contract:
 
 ## Related Documents
 
-- [Core architecture](RV32I_Core_Architecture.md)
-- [Core implementation](RV32I_Core_Implementation.md)
-- [CSR/SYSTEM controller contract](RV32I_CSR_SYSTEM_Design_Contract.md)
-- [Instruction decoder contract](RV32I_Instruction_Decoder_Design_Contract.md)
-- [Exceptions, traps, and extensions roadmap](RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+- [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
+- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [Core-owned state contract](RV32I_Core_Owned_State_Design_Contract.md)
+- [CSR/SYSTEM controller contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
+- [Trap controller contract](../Controller/RV32I_Trap_Controller_Design_Contract.md)
+- [Instruction decoder contract](../Controller/RV32I_Instruction_Decoder_Design_Contract.md)
+- [Exceptions, traps, and extensions roadmap](../../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 
 ## Metadata
 

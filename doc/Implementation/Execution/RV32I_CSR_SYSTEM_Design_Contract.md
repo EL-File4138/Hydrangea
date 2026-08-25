@@ -4,11 +4,11 @@
 
 **Status:** Implemented, regression-tested, and frozen for Core integration
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+**Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**CSR register bank:** [RV32I CSR Register Bank Design Contract](RV32I_CSR_Register_Bank_Design_Contract.md)
+**CSR register bank:** [RV32I CSR Register Bank Design Contract](../State/RV32I_CSR_Register_Bank_Design_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
 
 ## 1. Purpose
 
@@ -196,15 +196,16 @@ These passing regressions satisfy the controller completion criterion. The CSR c
 
 ## Related Documents
 
-- [Core architecture](RV32I_Core_Architecture.md)
-- [Core implementation](RV32I_Core_Implementation.md)
-- [CSR register-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md)
-- [Instruction decoder contract](RV32I_Instruction_Decoder_Design_Contract.md)
-- [Exceptions, traps, and extensions roadmap](RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+- [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
+- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [CSR register-bank contract](../State/RV32I_CSR_Register_Bank_Design_Contract.md)
+- [Instruction decoder contract](../Controller/RV32I_Instruction_Decoder_Design_Contract.md)
+- [Trap controller contract](../Controller/RV32I_Trap_Controller_Design_Contract.md)
+- [Exceptions, traps, and extensions roadmap](../../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 
 ## Metadata
 
 - Document type: module contract
 - Authority: Zicsr and SYSTEM instruction semantics, CSR-access trap conversion, MRET result generation, and controller-generated bank transactions
-- RTL authority: `rtl/core/ctrl/rv32_csr.sv`, `rtl/core/type/rv32_inst_pkg.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_trap_pkg.sv`
+- RTL authority: `rtl/core/exec/rv32_csr.sv`, `rtl/core/type/rv32_inst_pkg.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_trap_pkg.sv`
 - Verification authority: `testbench/cocotb/test-rv32_csr.py`, `testbench/cocotb/test-rv32_csr_csrreg_tb.py`, and later Core integration tests

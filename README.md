@@ -12,7 +12,7 @@ Do not use this repository as a conformance-proven CPU core or in safety-, secur
 
 - Base ISA:          RV32I
 - Target Deployment: FPGA Bare-metal
-- Extensions:        Zicsr, optionally Zifencei
+- Extensions:        Zicsr; Zifencei deferred
 - Privilege:         M-mode only
 - Endianness:        Little-endian
 - Instruction width: 32-bit only; IALIGN=32
@@ -26,7 +26,7 @@ Do not use this repository as a conformance-proven CPU core or in safety-, secur
 - RTL:               Synthesizable SystemVerilog.
 - Verification:      Cocotb regression tests, Verible linting, and a planned SymbiYosys formal flow.
 
-The RISC-V ISA specification remains the architectural authority. Project-specific ownership and interface decisions are documented in [`doc/RV32I_Core_Design_Contract.md`](doc/RV32I_Core_Design_Contract.md).
+The RISC-V ISA specification remains the architectural authority. Project-specific ownership and interface decisions are documented in the [RV32I Core Architecture](doc/Philosophy/RV32I_Core_Architecture.md).
 
 ## Repository Layout
 
@@ -91,10 +91,14 @@ RTL follows the [lowRISC Verilog Coding Style Guide](https://github.com/lowRISC/
 
 ## Documentation
 
-- [Core design contract](doc/RV32I_Core_Design_Contract.md)
-- [Controller and datapath plan](doc/RV32I_Core_Controller_and_Datapath_Plan.md)
-- [Load/store implementation plan](doc/RV32I_LSU_Implementation_Plan.md)
-- [Exceptions, traps, and extensions roadmap](doc/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+- [Core architecture](doc/Philosophy/RV32I_Core_Architecture.md)
+- [Execution-environment contract](doc/Philosophy/RV32I_Execution_Environment_Contract.md), [configuration/profile amendment](doc/RV32I_Execution_Environment_Profile_Amendment.md), and [deferred decisions](doc/Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md)
+- [Core implementation](doc/Roadmap/RV32I_Core_Implementation.md)
+- [Exceptions, traps, and extensions roadmap](doc/Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+- Controller contracts: [instruction decoder](doc/Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md) and [trap entry](doc/Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md)
+- Execution contracts: [ALU](doc/Implementation/Execution/RV32I_ALU_Design_Contract.md), [CTRL](doc/Implementation/Execution/RV32I_CTRL_Design_Contract.md), [LSU](doc/Implementation/Execution/RV32I_LSU_Contract.md), and [CSR/SYSTEM](doc/Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
+- State contracts: [register file](doc/Implementation/State/RV32I_Register_File_Design_Contract.md), [Core-owned state](doc/Implementation/State/RV32I_Core_Owned_State_Design_Contract.md), and [CSR register bank](doc/Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md)
+- [Memory subsystem contract](doc/Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
 ## License
 

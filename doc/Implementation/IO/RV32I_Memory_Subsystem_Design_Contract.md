@@ -2,11 +2,13 @@
 
 **Scope:** Generic core/LSU transactions and physical-memory adaptation
 
-**Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
+**Execution environment:** [RV32I Execution-Environment Contract](../../Philosophy/RV32I_Execution_Environment_Contract.md)
 
-**LSU contract:** [RV32I LSU Design Contract](RV32I_LSU_Contract.md)
+**Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**Core integration:** [RV32I Core Implementation](RV32I_Core_Implementation.md)
+**LSU contract:** [RV32I LSU Design Contract](../Execution/RV32I_LSU_Contract.md)
+
+**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
 
 ## 1. Purpose
 
@@ -19,12 +21,12 @@ The terms **shall**, **shall not**, and **may** denote a requirement, a prohibit
 The memory subsystem shall retain the following structure:
 
 ```text
-core fetch -> LSU fetch path -> IMEM interface -> IMEM adapter -> instruction backend
-
-core data  -> LSU data path  -> DMEM interface -> DMEM adapter -> data/MMIO backend
+core fetch -> LSU fetch path -> IMEM interface --+
+                                                  +-> profile-defined adapter/routing -> one or more backends
+core data  -> LSU data path  -> DMEM interface --+
 ```
 
-The IMEM and DMEM paths shall use separate instances of `rv32_mem_if`. An adapter is required between each generic interface and its physical backend, including a simple synchronous RAM or FPGA BRAM.
+The IMEM and DMEM paths shall use separate instances of `rv32_mem_if`. Adapter functionality is required between each generic interface and any physical backend, including a simple synchronous RAM or FPGA BRAM. A profile may implement that functionality in separate adapter modules or in one combined adapter that routes or arbitrates both paths to shared physical storage.
 
 The LSU shall define ISA-level memory semantics. Adapters shall define mapping and physical access. A backend shall receive only local or backend-native transactions.
 
@@ -82,9 +84,9 @@ The adapter shall not infer ISA transfer width from the address or decode an LSU
 
 ### 6.1 Common responsibilities
 
-Each adapter shall:
+For every connected generic interface, the adapter layer shall:
 
-- accept one responder-side `rv32_mem_if` connection;
+- accept the corresponding responder-side `rv32_mem_if` connection;
 - validate the configured architectural address range;
 - translate the architectural byte address into a backend-local address;
 - sequence backend requests and hide backend latency;
@@ -93,13 +95,13 @@ Each adapter shall:
 - complete and clean up a transaction without an additional core/LSU clear protocol; and
 - preserve the outstanding-transaction limit.
 
-Memory-region bases, sizes, local address widths, and routing options may be elaboration-time parameters. Changing them shall not change the core or LSU contract.
+Memory-region bases, sizes, local address widths, physical topology, and routing options may be elaboration-time parameters. Each concrete build profile shall resolve them coherently with its linker, startup, loader/boot path, and platform headers under the execution-environment contract. Current shared-RAM defaults are example configuration values rather than Core or LSU invariants. Changing profile values or selecting unified versus separate backends shall not change the core or LSU contract.
 
-### 6.2 IMEM adapter
+### 6.2 IMEM-path adaptation
 
 The IMEM adapter shall implement instruction-region mapping and read sequencing. It shall return one instruction word or a failed completion for an unmapped or backend-failed access.
 
-### 6.3 DMEM adapter
+### 6.3 DMEM-path adaptation
 
 The DMEM adapter shall preserve LSU-generated write lanes and shall return raw 32-bit read data. It may route requests among RAM, MMIO, a cache, or an external bus, but shall not repeat load signedness, load extension, or store-width decoding.
 
