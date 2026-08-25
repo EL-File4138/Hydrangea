@@ -85,8 +85,7 @@ package rv32_inst_pkg;
   typedef enum logic [1:0] {
     PC_SEQ,
     PC_CTRL,
-    PC_CSR,
-    PC_TRAP
+    PC_CSR
   } pc_src_t;
 
   typedef struct packed {
