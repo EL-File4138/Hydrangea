@@ -20,7 +20,7 @@ module rv32_register_file (
     begin
       if (!rst_ni) begin
         reg_cell <= '{default: '0};
-      end else if (write_enable_i)
+      end else if (write_enable_i && (write_addr_i != '0))
         begin
           reg_cell[write_addr_i] <= write_data_i;
         end

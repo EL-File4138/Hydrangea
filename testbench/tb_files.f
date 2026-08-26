@@ -1,3 +1,6 @@
+testbench/rv32_core_backpressure_tb.sv
+testbench/rv32_core_failclosed_tb.sv
+testbench/rv32_core_tb.sv
 testbench/rv32_csr_csrreg_tb.sv
 testbench/rv32_lsu_tb.sv
 testbench/rv32_shared_sync_ram_adapter_tb.sv
