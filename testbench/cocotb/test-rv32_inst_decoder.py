@@ -4,7 +4,7 @@ import cocotb
 from cocotb.triggers import Timer
 
 
-# Encodings from rv32_inst_pkg.sv. inst_sem_t is packed MSB-first in declaration
+# Encodings from rv32_inst_pkg.sv. inst_semantics_t is packed MSB-first in declaration
 # order, so these constants also describe the public sem_o port layout.
 ALU_ADD = 0b0000
 ALU_SUB = 0b1000
@@ -254,6 +254,7 @@ def decode_reference(inst):
         if funct3 not in ops:
             return None
         immediate, system = bool(funct3 & 4), funct3 == CSR_SYS
+        is_wfi = system and ((inst >> 20) & 0xFFF) == 0x105
         return common | {
             "rs1_used": int(not immediate and not system),
             "rs2_used": 0,
@@ -262,7 +263,7 @@ def decode_reference(inst):
             "csr_op": ops[funct3],
             "csr_uimm": ((inst >> 15) & 0x1F) if immediate else 0,
             "wb_src": WB_CSR,
-            "pc_src": PC_CSR if system else PC_SEQ,
+            "pc_src": PC_CSR if system and not is_wfi else PC_SEQ,
         }
 
     if opcode == 0b0001111 and funct3 == 0b000:

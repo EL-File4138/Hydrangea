@@ -1,4 +1,4 @@
-module sv_wave_dump;
+module rv32_wave_dump;
     string wave_file;
 
     initial begin

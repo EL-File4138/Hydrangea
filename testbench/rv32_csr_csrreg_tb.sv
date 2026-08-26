@@ -2,7 +2,7 @@ module rv32_csr_csrreg_tb (
     input logic clk_i,
     input logic rst_ni,
 
-    input rv32_inst_pkg::csr_op_t csr_op_i,
+    input rv32_inst_pkg::csr_op_e csr_op_i,
     input logic [11:0] csr_imm_i,
     input logic [4:0] csr_uimm_i,
     input logic [31:0] rs1_var_i,
@@ -21,7 +21,7 @@ module rv32_csr_csrreg_tb (
   rv32_csr_pkg::csr_write_t csr_wr[1];
   logic csr_wr_legal[1];
 
-  rv32_csr csr (
+  rv32_csr_controller csr (
       .csr_op_i,
       .csr_imm_i,
       .csr_uimm_i,
@@ -39,7 +39,7 @@ module rv32_csr_csrreg_tb (
       .trap_o
   );
 
-  rv32_csrreg #(
+  rv32_csr_register_bank #(
       .ReadPorts(2),
       .WritePorts(1)
   ) csrreg (

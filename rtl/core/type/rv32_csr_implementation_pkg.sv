@@ -1,15 +1,18 @@
-package rv32_csr_impl_pkg;
+package rv32_csr_implementation_pkg;
 
   import rv32_csr_pkg::*;
 
+  // CSR implementations share a uniform request/current-value function API.
+  // Individual CSRs intentionally ignore reserved fields or immutable state.
+  /* verilator lint_off UNUSEDSIGNAL */
   // Helper
   function automatic csr_rsp_t csr_read_only(input csr_req_t req, input logic [31:0] value);
     csr_rsp_t a;
 
     a = '0;
-    a.rdata = value;
-    a.next = value;
-    a.legal = !req.wr_en;
+    a.read_data = value;
+    a.value_candidate = value;
+    a.is_legal = !req.write_enable;
     return a;
   endfunction : csr_read_only
 
@@ -17,9 +20,9 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata = value;
-    a.next = value;
-    a.legal = 1'b1;
+    a.read_data = value;
+    a.value_candidate = value;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_fixed_mrw
 
@@ -30,25 +33,25 @@ package rv32_csr_impl_pkg;
     a = '0;
 
     // Architectural read value
-    a.rdata = current;
-    a.rdata[12:11] = 2'b11;  // fixed MPP: M-mode only
+    a.read_data = current;
+    a.read_data[12:11] = 2'b11;  // fixed MPP: M-mode only
 
     // Default: preserve state
-    a.next = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-      a.next[12:11] = 2'b11;
-    end else if (req.wr_en) begin
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+      a.value_candidate[12:11] = 2'b11;
+    end else if (req.write_enable) begin
       // RW fields
-      a.next[3] = req.wdata[3];  // MIE
-      a.next[7] = req.wdata[7];  // MPIE
+      a.value_candidate[3] = req.write_data[3];  // MIE
+      a.value_candidate[7] = req.write_data[7];  // MPIE
 
       // Fixed field
-      a.next[12:11] = 2'b11;
+      a.value_candidate[12:11] = 2'b11;
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mstatus
 
@@ -56,20 +59,20 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata[31:2] = current[31:2];
+    a.read_data[31:2] = current[31:2];
 
     // Default: preserve state
-    a.next = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next = {req.wdata[31:2], 2'b00};
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate = {req.write_data[31:2], 2'b00};
       // Trap mode: Direct Mode
       // TODO: Base addr is deferred
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mtvec
 
@@ -77,18 +80,18 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata[31:2] = current[31:2];
+    a.read_data[31:2] = current[31:2];
 
     // Default: preserve state
-    a.next = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next = {req.wdata[31:2], 2'b00}; // Not required, but enforced to prevent unaligned addr
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate = {req.write_data[31:2], 2'b00}; // Not required, but enforced to prevent unaligned addr
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mepc
 
@@ -96,18 +99,18 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata = current;
+    a.read_data = current;
 
     // Default: preserve state
-    a.next = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next = req.wdata; // Transferred by trap controller
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate = req.write_data; // Transferred by trap controller
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mcause
 
@@ -115,18 +118,18 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata = current;
+    a.read_data = current;
 
     // Default: preserve state
-    a.next = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next = req.wdata;  // Transferred by trap controller
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate = req.write_data;  // Transferred by trap controller
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mtval
 
@@ -135,16 +138,16 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata[7] = current[7];
-    a.next[7] = current[7];
+    a.read_data[7] = current[7];
+    a.value_candidate[7] = current[7];
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next[7] = req.wdata[7];
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate[7] = req.write_data[7];
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mie
 
@@ -152,14 +155,14 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata[7] = current[7];
-    a.next[7] = current[7];
+    a.read_data[7] = current[7];
+    a.value_candidate[7] = current[7];
 
-    if (req.rst_en) begin
-      a.next = '0;
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mip
 
@@ -171,16 +174,16 @@ package rv32_csr_impl_pkg;
     csr_rsp_t a;
 
     a = '0;
-    a.rdata = current;
-    a.next = current;
+    a.read_data = current;
+    a.value_candidate = current;
 
-    if (req.rst_en) begin
-      a.next = '0;
-    end else if (req.wr_en) begin
-      a.next = req.wdata;
+    if (req.reset_enable) begin
+      a.value_candidate = '0;
+    end else if (req.write_enable) begin
+      a.value_candidate = req.write_data;
     end
 
-    a.legal = 1'b1;
+    a.is_legal = 1'b1;
     return a;
   endfunction : csr_mscratch
 
@@ -210,4 +213,6 @@ package rv32_csr_impl_pkg;
     return csr_read_only(req, 32'h0000_0000); // No Config provided
   endfunction : csr_mconfigptr
 
-endpackage : rv32_csr_impl_pkg
+  /* verilator lint_on UNUSEDSIGNAL */
+
+endpackage : rv32_csr_implementation_pkg

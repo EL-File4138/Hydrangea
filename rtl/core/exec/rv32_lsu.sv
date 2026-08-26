@@ -11,7 +11,7 @@ module rv32_lsu (
     output rv32_trap_pkg::trap_req_t        if_trap_o,
 
     input logic                          data_req_i,
-    input rv32_inst_pkg::lsu_op_t        lsu_op_i,
+    input rv32_inst_pkg::lsu_op_e        lsu_op_i,
     input logic                   [31:0] base_i,
     input logic                   [31:0] store_data_i,
     input logic                   [31:0] imm_i,
@@ -55,38 +55,38 @@ module rv32_lsu (
     data_wstrb = 4'b0000;
 
     load_result_o = 32'b0;
-    selected_byte = dmem_if_i.rdata >> (8 * data_addr[1:0]);
-    selected_half = dmem_if_i.rdata >> (8 * data_addr[1:0]);
+    selected_byte = dmem_if_i.rdata[8 * data_addr[1:0]+:8];
+    selected_half = dmem_if_i.rdata[8 * data_addr[1:0]+:16];
 
     if_trap_o = '0;
     data_trap_o = '0;
     local_data_err = 0;
 
     if (if_req_i && imem_if_i.ready && imem_if_i.err) begin
-      if_trap_o = rv32_trap_pkg::exception(rv32_trap_pkg::EXC_INST_ACCESS_FAULT, if_addr_i);
+      if_trap_o = rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_INST_ACCESS_FAULT, if_addr_i);
     end
 
     if (data_req_i) begin
       if (lsu_op_i[3]) begin  // Store
         unique case (lsu_op_i)
-          rv32_inst_pkg::LSU_Sb: begin
+          rv32_inst_pkg::LSU_SB: begin
             data_wdata = {24'b0, store_data_i[7:0]} << (8 * (data_addr[1:0]));
             data_wstrb = 4'b0001 << (data_addr[1:0]);
           end
-          rv32_inst_pkg::LSU_Sh: begin
+          rv32_inst_pkg::LSU_SH: begin
             if (data_addr[0]) begin
               data_trap_o =
-                  rv32_trap_pkg::exception(rv32_trap_pkg::EXC_STORE_ADDR_MISALIGNED, data_addr);
+                  rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_STORE_ADDR_MISALIGNED, data_addr);
               local_data_err = 1'b1;
             end else begin
               data_wdata = {16'b0, store_data_i[15:0]} << (8 * (data_addr[1:0]));
               data_wstrb = 4'b0011 << (data_addr[1:0]);
             end
           end
-          rv32_inst_pkg::LSU_Sw: begin
+          rv32_inst_pkg::LSU_SW: begin
             if (data_addr[1:0] != 2'b00) begin
               data_trap_o =
-                  rv32_trap_pkg::exception(rv32_trap_pkg::EXC_STORE_ADDR_MISALIGNED, data_addr);
+                  rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_STORE_ADDR_MISALIGNED, data_addr);
               local_data_err = 1;
             end else begin
               data_wdata = store_data_i;
@@ -95,39 +95,39 @@ module rv32_lsu (
           end
           default: begin
             local_data_err = 1;
-            data_trap_o = rv32_trap_pkg::exception(rv32_trap_pkg::EXC_ILLEGAL_INST, 32'b0);
+            data_trap_o = rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_ILLEGAL_INST, 32'b0);
           end
         endcase
 
         if (data_req_i && dmem_if_i.ready && dmem_if_i.err) begin
-          data_trap_o = rv32_trap_pkg::exception(rv32_trap_pkg::EXC_STORE_ACCESS_FAULT, data_addr);
+          data_trap_o = rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_STORE_ACCESS_FAULT, data_addr);
         end
       end else begin  // Load
         unique case (lsu_op_i)
-          rv32_inst_pkg::LSU_Lb:  load_result_o = {{24{selected_byte[7]}}, selected_byte};
-          rv32_inst_pkg::LSU_Lbu: load_result_o = {24'b0, selected_byte};
-          rv32_inst_pkg::LSU_Lh: begin
+          rv32_inst_pkg::LSU_LB:  load_result_o = {{24{selected_byte[7]}}, selected_byte};
+          rv32_inst_pkg::LSU_LBU: load_result_o = {24'b0, selected_byte};
+          rv32_inst_pkg::LSU_LH: begin
             if (data_addr[0]) begin
               data_trap_o =
-                  rv32_trap_pkg::exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
+                  rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
               local_data_err = 1;
             end else begin
               load_result_o = {{16{selected_half[15]}}, selected_half};
             end
           end
-          rv32_inst_pkg::LSU_Lhu: begin
+          rv32_inst_pkg::LSU_LHU: begin
             if (data_addr[0]) begin
               data_trap_o =
-                  rv32_trap_pkg::exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
+                  rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
               local_data_err = 1;
             end else begin
               load_result_o = {16'b0, selected_half};
             end
           end
-          rv32_inst_pkg::LSU_Lw: begin
+          rv32_inst_pkg::LSU_LW: begin
             if (data_addr[1:0] != 2'b00) begin
               data_trap_o =
-                  rv32_trap_pkg::exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
+                  rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_LOAD_ADDR_MISALIGNED, data_addr);
               local_data_err = 1;
             end else begin
               load_result_o = dmem_if_i.rdata;
@@ -135,12 +135,12 @@ module rv32_lsu (
           end
           default: begin
             local_data_err = 1;
-            data_trap_o = rv32_trap_pkg::exception(rv32_trap_pkg::EXC_ILLEGAL_INST, 32'b0);
+            data_trap_o = rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_ILLEGAL_INST, 32'b0);
           end
         endcase
 
         if (data_req_i && dmem_if_i.ready && dmem_if_i.err) begin
-          data_trap_o = rv32_trap_pkg::exception(rv32_trap_pkg::EXC_LOAD_ACCESS_FAULT, data_addr);
+          data_trap_o = rv32_trap_pkg::make_exception(rv32_trap_pkg::EXC_LOAD_ACCESS_FAULT, data_addr);
         end
       end
     end

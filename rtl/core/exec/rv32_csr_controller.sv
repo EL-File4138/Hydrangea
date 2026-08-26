@@ -1,7 +1,7 @@
 `default_nettype none
 
-module rv32_csr (
-    input rv32_inst_pkg::csr_op_t        csr_op_i,
+module rv32_csr_controller (
+    input rv32_inst_pkg::csr_op_e        csr_op_i,
     input logic                   [11:0] csr_imm_i,
     input logic                   [ 4:0] csr_uimm_i,
 
@@ -45,14 +45,14 @@ module rv32_csr (
     unique case (csr_op_i)
       rv32_inst_pkg::CSR_SYS: begin
         if (!rd_is_zero_i || !rs1_is_zero_i) begin
-          trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+          trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
         end else begin
           unique case (csr_imm_i)
             12'h000:  // ECALL
-            trap_o = exception(EXC_ECALL_M, 32'b0);
+            trap_o = make_exception(EXC_ECALL_M, 32'b0);
 
             12'h001:  // EBREAK
-            trap_o = exception(EXC_BREAKPOINT, 32'b0);
+            trap_o = make_exception(EXC_BREAKPOINT, 32'b0);
 
             12'h105: begin  // WFI - nop for now
             end
@@ -67,9 +67,9 @@ module rv32_csr (
                 mstatus_next[3] = csr_rdata_i[1][7];
                 mstatus_next[7] = 1;
 
-                write_tr.en = 1;
-                write_tr.addr = rv32_csr_pkg::MSTATUS;
-                write_tr.wdata = mstatus_next;
+                write_tr.write_enable = 1;
+                write_tr.address = rv32_csr_pkg::MSTATUS;
+                write_tr.write_data = mstatus_next;
 
                 csr_wr_o = write_tr;
 
@@ -77,13 +77,13 @@ module rv32_csr (
                   pc_valid_o = 1;
                   pc_o = csr_rdata_i[0];
                 end else begin
-                  trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+                  trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
                 end
               end else begin
-                trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+                trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
               end
             end
-            default: trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+            default: trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
           endcase
         end
       end
@@ -92,32 +92,32 @@ module rv32_csr (
           // Read
           csr_raddr_o[0] = csr_imm_i;
           if (!csr_rlegal_i[0]) begin
-            trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+            trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
           end else begin
             rd_result_o = csr_rdata_i[0];
 
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = rs1_var_i;
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = rs1_var_i;
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end else begin
           // Read suppressed architecturally, write still happens
-          write_tr.en    = 1;
-          write_tr.addr  = csr_imm_i;
-          write_tr.wdata = rs1_var_i;
+          write_tr.write_enable    = 1;
+          write_tr.address  = csr_imm_i;
+          write_tr.write_data = rs1_var_i;
 
           csr_wr_o       = write_tr;
 
           if (!csr_wr_legal_i) begin
-            trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+            trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
           end
         end
       end
@@ -125,7 +125,7 @@ module rv32_csr (
         // Read
         csr_raddr_o[0] = csr_imm_i;
         if (!csr_rlegal_i[0]) begin
-          trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+          trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
         end else begin
           rd_result_o = csr_rdata_i[0];
 
@@ -133,14 +133,14 @@ module rv32_csr (
           if (!rs1_is_zero_i) begin
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = csr_rdata_i[0] | rs1_var_i;
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = csr_rdata_i[0] | rs1_var_i;
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end
@@ -149,7 +149,7 @@ module rv32_csr (
         // Read
         csr_raddr_o[0] = csr_imm_i;
         if (!csr_rlegal_i[0]) begin
-          trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+          trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
         end else begin
           rd_result_o = csr_rdata_i[0];
 
@@ -157,14 +157,14 @@ module rv32_csr (
           if (!rs1_is_zero_i) begin
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = csr_rdata_i[0] & ~rs1_var_i;
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = csr_rdata_i[0] & ~rs1_var_i;
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end
@@ -174,33 +174,33 @@ module rv32_csr (
           // Read
           csr_raddr_o[0] = csr_imm_i;
           if (!csr_rlegal_i[0]) begin
-            trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+            trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
           end else begin
             rd_result_o = csr_rdata_i[0];
 
 
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = {27'b0, csr_uimm_i};
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = {27'b0, csr_uimm_i};
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end else begin
           // Read suppressed architecturally, write still happens
-          write_tr.en    = 1;
-          write_tr.addr  = csr_imm_i;
-          write_tr.wdata = {27'b0, csr_uimm_i};
+          write_tr.write_enable    = 1;
+          write_tr.address  = csr_imm_i;
+          write_tr.write_data = {27'b0, csr_uimm_i};
 
           csr_wr_o       = write_tr;
 
           if (!csr_wr_legal_i) begin
-            trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+            trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
           end
         end
       end
@@ -208,7 +208,7 @@ module rv32_csr (
         // Read
         csr_raddr_o[0] = csr_imm_i;
         if (!csr_rlegal_i[0]) begin
-          trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+          trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
         end else begin
           rd_result_o = csr_rdata_i[0];
 
@@ -216,14 +216,14 @@ module rv32_csr (
           if (csr_uimm_i != 5'b0) begin
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = csr_rdata_i[0] | {27'b0, csr_uimm_i};
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = csr_rdata_i[0] | {27'b0, csr_uimm_i};
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end
@@ -232,7 +232,7 @@ module rv32_csr (
         // Read
         csr_raddr_o[0] = csr_imm_i;
         if (!csr_rlegal_i[0]) begin
-          trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+          trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
         end else begin
           rd_result_o = csr_rdata_i[0];
 
@@ -240,24 +240,24 @@ module rv32_csr (
           if (csr_uimm_i != 5'b0) begin
             // Write
 
-            write_tr.en = 1;
-            write_tr.addr = csr_imm_i;
-            write_tr.wdata = csr_rdata_i[0] & ~{27'b0, csr_uimm_i};
+            write_tr.write_enable = 1;
+            write_tr.address = csr_imm_i;
+            write_tr.write_data = csr_rdata_i[0] & ~{27'b0, csr_uimm_i};
 
             csr_wr_o = write_tr;
 
             if (!csr_wr_legal_i) begin
-              trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+              trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
             end
           end
         end
       end
       default: begin
-        trap_o = exception(EXC_ILLEGAL_INST, 32'b0);
+        trap_o = make_exception(EXC_ILLEGAL_INST, 32'b0);
       end
     endcase
   end
 
-endmodule : rv32_csr
+endmodule : rv32_csr_controller
 
 `default_nettype wire

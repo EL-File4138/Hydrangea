@@ -13,30 +13,30 @@ package rv32_trap_pkg;
 
     EXC_ECALL_U = 31'd8,
     EXC_ECALL_M = 31'd11
-  } exception_code_t;
+  } exception_code_e;
 
   typedef enum logic [30:0] {
     INT_MACHINE_SOFTWARE = 31'd3,
     INT_MACHINE_TIMER    = 31'd7,
     INT_MACHINE_EXTERNAL = 31'd11
-  } interrupt_code_t;
+  } interrupt_code_e;
 
   typedef struct packed {
-    logic        valid;
-    logic        interrupt;
+    logic        is_valid;
+    logic        is_interrupt;
     logic [30:0] code;
     logic [31:0] tval;
   } trap_req_t;
 
-  function automatic trap_req_t exception(input logic [30:0] code, input logic [31:0] tval);
+  function automatic trap_req_t make_exception(input logic [30:0] code, input logic [31:0] tval);
     trap_req_t trap;
 
-    trap.valid     = 1'b1;
-    trap.interrupt = 1'b0;
+    trap.is_valid     = 1'b1;
+    trap.is_interrupt = 1'b0;
     trap.code      = code;
     trap.tval      = tval;
 
     return trap;
-  endfunction
+  endfunction : make_exception
 
 endpackage : rv32_trap_pkg

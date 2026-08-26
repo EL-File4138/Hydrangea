@@ -1,6 +1,6 @@
 `default_nettype none
 
-module rv32_regfile (
+module rv32_register_file (
     input logic clk_i,
     input logic rst_ni,
     input logic write_enable_i,
@@ -29,6 +29,6 @@ module rv32_regfile (
   assign read_data_a_o = (read_addr_a_i != '0) ? reg_cell[read_addr_a_i] : '0;
   assign read_data_b_o = (read_addr_b_i != '0) ? reg_cell[read_addr_b_i] : '0;
 
-endmodule : rv32_regfile
+endmodule : rv32_register_file
 
 `default_nettype wire

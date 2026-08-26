@@ -1,4 +1,4 @@
 testbench/rv32_csr_csrreg_tb.sv
 testbench/rv32_lsu_tb.sv
 testbench/rv32_shared_sync_ram_adapter_tb.sv
-testbench/sv_wave_dump.sv
+testbench/rv32_wave_dump.sv

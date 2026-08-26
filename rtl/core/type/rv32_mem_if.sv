@@ -1,5 +1,9 @@
 interface rv32_mem_if;
 
+  // The core-only lint top deliberately leaves requester interfaces unbound.
+  // Connectivity is checked by integration tops with concrete responders.
+  /* verilator lint_off UNUSEDSIGNAL */
+  /* verilator lint_off UNDRIVEN */
   logic        req;
   logic        we;
   logic [31:0] addr;
@@ -9,6 +13,8 @@ interface rv32_mem_if;
   logic        ready;
   logic [31:0] rdata;
   logic        err;
+  /* verilator lint_on UNDRIVEN */
+  /* verilator lint_on UNUSEDSIGNAL */
 
   modport requester(
       output req,
@@ -22,7 +28,7 @@ interface rv32_mem_if;
       input err
   );
 
-  modport respondend(
+  modport responder(
       input req,
       input we,
       input addr,

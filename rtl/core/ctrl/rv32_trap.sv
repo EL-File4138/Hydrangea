@@ -41,22 +41,22 @@ module rv32_trap (
 
       pc_o                = {csr_rdata_i[1][31:2], 2'b00};
 
-      if (trap_i.valid) begin
-        csr_wr_o[0].en = 1;
-        csr_wr_o[0].addr = rv32_csr_pkg::MEPC;
-        csr_wr_o[0].wdata = pc_i;
+      if (trap_i.is_valid) begin
+        csr_wr_o[0].write_enable = 1;
+        csr_wr_o[0].address = rv32_csr_pkg::MEPC;
+        csr_wr_o[0].write_data = pc_i;
 
-        csr_wr_o[1].en = 1;
-        csr_wr_o[1].addr = rv32_csr_pkg::MCAUSE;
-        csr_wr_o[1].wdata = {trap_i.interrupt, trap_i.code};
+        csr_wr_o[1].write_enable = 1;
+        csr_wr_o[1].address = rv32_csr_pkg::MCAUSE;
+        csr_wr_o[1].write_data = {trap_i.is_interrupt, trap_i.code};
 
-        csr_wr_o[2].en = 1;
-        csr_wr_o[2].addr = rv32_csr_pkg::MTVAL;
-        csr_wr_o[2].wdata = trap_i.tval;
+        csr_wr_o[2].write_enable = 1;
+        csr_wr_o[2].address = rv32_csr_pkg::MTVAL;
+        csr_wr_o[2].write_data = trap_i.tval;
 
-        csr_wr_o[3].en = 1;
-        csr_wr_o[3].addr = rv32_csr_pkg::MSTATUS;
-        csr_wr_o[3].wdata = mstatus_next;
+        csr_wr_o[3].write_enable = 1;
+        csr_wr_o[3].address = rv32_csr_pkg::MSTATUS;
+        csr_wr_o[3].write_data = mstatus_next;
 
         if (csr_wr_legal_i[0] && csr_wr_legal_i[1] && csr_wr_legal_i[2] && csr_wr_legal_i[3]) begin
           pc_valid_o = 1;

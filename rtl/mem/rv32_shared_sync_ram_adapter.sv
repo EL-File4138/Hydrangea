@@ -15,19 +15,19 @@ module rv32_shared_sync_ram_adapter #(
     input logic clk_i,
     input logic rst_ni,
 
-    rv32_mem_if.respondend imem_if_i,
-    rv32_mem_if.respondend dmem_if_i
+    rv32_mem_if.responder imem_if_i,
+    rv32_mem_if.responder dmem_if_i
 );
 
   typedef enum logic [1:0] {
-    Idle,
-    RamAccess,
-    Respond,
-    WaitForRequestDrop
-  } state_t;
+    RAM_STATE_IDLE,
+    RAM_STATE_ACCESS,
+    RAM_STATE_RESPOND,
+    RAM_STATE_WAIT_FOR_REQUEST_DROP
+  } ram_state_e;
 
-  state_t state_q;
-  state_t state_d;
+  ram_state_e state_q;
+  ram_state_e state_d;
   logic owner_is_imem_q;
   logic [31:0] local_addr_q;
   logic write_q;
@@ -37,7 +37,7 @@ module rv32_shared_sync_ram_adapter #(
 
   logic ram_write_enable;
   logic [31:0] ram_write_data;
-  rv32_inst_pkg::mem_op_width_t ram_write_type;
+  rv32_inst_pkg::mem_width_e ram_write_type;
   logic [31:0] ram_read_data;
 
   function automatic logic address_is_mapped(
@@ -71,38 +71,38 @@ module rv32_shared_sync_ram_adapter #(
   endfunction
 
   always_comb begin
-    ram_write_enable = (state_q == RamAccess) && write_q;
+    ram_write_enable = (state_q == RAM_STATE_ACCESS) && write_q;
     ram_write_data = wdata_q;
-    ram_write_type = rv32_inst_pkg::WORD;
+    ram_write_type = rv32_inst_pkg::MEM_WIDTH_WORD;
 
     unique case (wstrb_q)
       4'b0001: begin
         ram_write_data = wdata_q;
-        ram_write_type = rv32_inst_pkg::BYTE;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_BYTE;
       end
       4'b0010: begin
         ram_write_data = wdata_q >> 8;
-        ram_write_type = rv32_inst_pkg::BYTE;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_BYTE;
       end
       4'b0100: begin
         ram_write_data = wdata_q >> 16;
-        ram_write_type = rv32_inst_pkg::BYTE;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_BYTE;
       end
       4'b1000: begin
         ram_write_data = wdata_q >> 24;
-        ram_write_type = rv32_inst_pkg::BYTE;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_BYTE;
       end
       4'b0011: begin
         ram_write_data = wdata_q;
-        ram_write_type = rv32_inst_pkg::HALF;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_HALF;
       end
       4'b1100: begin
         ram_write_data = wdata_q >> 16;
-        ram_write_type = rv32_inst_pkg::HALF;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_HALF;
       end
       default: begin
         ram_write_data = wdata_q;
-        ram_write_type = rv32_inst_pkg::WORD;
+        ram_write_type = rv32_inst_pkg::MEM_WIDTH_WORD;
       end
     endcase
   end
@@ -115,7 +115,7 @@ module rv32_shared_sync_ram_adapter #(
     dmem_if_i.rdata = 32'b0;
     dmem_if_i.err = 1'b0;
 
-    if (state_q == Respond) begin
+    if (state_q == RAM_STATE_RESPOND) begin
       if (owner_is_imem_q) begin
         imem_if_i.ready = 1'b1;
         imem_if_i.rdata = ram_read_data;
@@ -132,38 +132,38 @@ module rv32_shared_sync_ram_adapter #(
     state_d = state_q;
 
     unique case (state_q)
-      Idle: begin
+      RAM_STATE_IDLE: begin
         if (imem_if_i.req) begin
           if (address_is_mapped(imem_if_i.addr, ImemBaseAddr, ImemSizeBytes) &&
               !imem_if_i.we && (imem_if_i.wstrb == 4'b0000)) begin
-            state_d = RamAccess;
+            state_d = RAM_STATE_ACCESS;
           end else begin
-            state_d = Respond;
+            state_d = RAM_STATE_RESPOND;
           end
         end else if (dmem_if_i.req) begin
           if (address_is_mapped(dmem_if_i.addr, DmemBaseAddr, DmemSizeBytes) &&
               write_strobes_are_valid(dmem_if_i.we, dmem_if_i.wstrb)) begin
-            state_d = RamAccess;
+            state_d = RAM_STATE_ACCESS;
           end else begin
-            state_d = Respond;
+            state_d = RAM_STATE_RESPOND;
           end
         end
       end
-      RamAccess: state_d = Respond;
-      Respond: state_d = WaitForRequestDrop;
-      WaitForRequestDrop: begin
+      RAM_STATE_ACCESS: state_d = RAM_STATE_RESPOND;
+      RAM_STATE_RESPOND: state_d = RAM_STATE_WAIT_FOR_REQUEST_DROP;
+      RAM_STATE_WAIT_FOR_REQUEST_DROP: begin
         if ((owner_is_imem_q && !imem_if_i.req) ||
             (!owner_is_imem_q && !dmem_if_i.req)) begin
-          state_d = Idle;
+          state_d = RAM_STATE_IDLE;
         end
       end
-      default: state_d = Idle;
+      default: state_d = RAM_STATE_IDLE;
     endcase
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      state_q <= Idle;
+      state_q <= RAM_STATE_IDLE;
       owner_is_imem_q <= 1'b0;
       local_addr_q <= 32'b0;
       write_q <= 1'b0;
@@ -173,7 +173,7 @@ module rv32_shared_sync_ram_adapter #(
     end else begin
       state_q <= state_d;
       unique case (state_q)
-        Idle: begin
+        RAM_STATE_IDLE: begin
           // The baseline core never overlaps paths; IMEM priority is deterministic
           // if this example is connected to a requester that does.
           if (imem_if_i.req) begin

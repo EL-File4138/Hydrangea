@@ -6,7 +6,7 @@ package rv32_csr_pkg;
     WPRI,
     WARL,
     WLRL
-  } csr_sem_t;
+  } csr_semantics_e;
 
   typedef enum logic [11:0] {
     MSTATUS    = 12'h300,
@@ -24,7 +24,7 @@ package rv32_csr_pkg;
     MIMPID     = 12'hF13,
     MHARTID    = 12'hF14,
     MCONFIGPTR = 12'hF15
-  } csr_addr_t;
+  } csr_address_e;
 
   typedef enum int unsigned {
     IDX_MSTATUS,
@@ -42,27 +42,27 @@ package rv32_csr_pkg;
     IDX_MIMPID,
     IDX_MHARTID,
     IDX_MCONFIGPTR,
-    NUM_CSRS
-  } csr_idx_t;
+    CSR_COUNT
+  } csr_index_e;
 
   typedef struct packed {
-    logic        wr_en;
-    logic        rst_en;
-    logic [31:0] wdata;
+    logic        write_enable;
+    logic        reset_enable;
+    logic [31:0] write_data;
   } csr_req_t;
 
   typedef struct packed {
-    logic        legal;
-    logic [31:0] rdata;
-    logic [31:0] next;
+    logic        is_legal;
+    logic [31:0] read_data;
+    logic [31:0] value_candidate;
 
-    csr_idx_t cell_idx;
-    logic     cell_valid;
+    csr_index_e cell_index;
+    logic       cell_is_valid;
   } csr_rsp_t;
 
   typedef struct packed {
-    logic        en;
-    logic [11:0] addr;
-    logic [31:0] wdata;
+    logic        write_enable;
+    logic [11:0] address;
+    logic [31:0] write_data;
   } csr_write_t;
 endpackage : rv32_csr_pkg

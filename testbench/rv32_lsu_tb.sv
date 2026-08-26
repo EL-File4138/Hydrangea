@@ -10,7 +10,7 @@ module rv32_lsu_tb (
     output logic [30:0] if_trap_code_o,
     output logic [31:0] if_trap_tval_o,
     input logic data_req_i,
-    input rv32_inst_pkg::lsu_op_t lsu_op_i,
+    input rv32_inst_pkg::lsu_op_e lsu_op_i,
     input logic [31:0] base_i,
     input logic [31:0] store_data_i,
     input logic [31:0] imm_i,
@@ -50,8 +50,8 @@ module rv32_lsu_tb (
   assign imem_addr_o = imem_if.addr;
   assign imem_wdata_o = imem_if.wdata;
   assign imem_wstrb_o = imem_if.wstrb;
-  assign if_trap_valid_o = if_trap.valid;
-  assign if_trap_interrupt_o = if_trap.interrupt;
+  assign if_trap_valid_o = if_trap.is_valid;
+  assign if_trap_interrupt_o = if_trap.is_interrupt;
   assign if_trap_code_o = if_trap.code;
   assign if_trap_tval_o = if_trap.tval;
 
@@ -63,8 +63,8 @@ module rv32_lsu_tb (
   assign dmem_addr_o = dmem_if.addr;
   assign dmem_wdata_o = dmem_if.wdata;
   assign dmem_wstrb_o = dmem_if.wstrb;
-  assign data_trap_valid_o = data_trap.valid;
-  assign data_trap_interrupt_o = data_trap.interrupt;
+  assign data_trap_valid_o = data_trap.is_valid;
+  assign data_trap_interrupt_o = data_trap.is_interrupt;
   assign data_trap_code_o = data_trap.code;
   assign data_trap_tval_o = data_trap.tval;
 
