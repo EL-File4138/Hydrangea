@@ -16,7 +16,7 @@ def build_manifest_entries(repo_root: Path, source_dir: Path) -> list[str]:
     entries.sort(
         key=lambda entry: (
             0 if "/type/" in entry else 1,
-            1 if entry.endswith("_impl_pkg.sv") else 0,
+            1 if entry.endswith("_implementation_pkg.sv") else 0,
             entry,
         )
     )

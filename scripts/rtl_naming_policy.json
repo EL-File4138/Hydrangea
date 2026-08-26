@@ -1,0 +1,16 @@
+{
+  "core_rtl_prefix": "rv32_",
+  "core_rtl_roots": ["rtl/core"],
+  "enum_prefixes": {
+    "inst_format_e": "INST_FORMAT_",
+    "mem_width_e": "MEM_WIDTH_",
+    "load_signedness_e": "LOAD_",
+    "alu_op_e": "ALU_",
+    "lsu_op_e": "LSU_",
+    "control_op_e": "CONTROL_",
+    "csr_op_e": "CSR_",
+    "writeback_source_e": "WRITEBACK_SOURCE_",
+    "pc_source_e": "PC_SOURCE_"
+  },
+  "forbidden_identifiers": ["u_", "i_", "wr", "en", "var"]
+}

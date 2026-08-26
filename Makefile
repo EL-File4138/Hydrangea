@@ -83,6 +83,7 @@ SIM_SRCS := $(RTL_SRCS) $(TB_SRCS)
 
 VERILATOR   ?= verilator
 VERIBLE     ?= verible-verilog-lint
+VERIBLE_SYNTAX ?= verible-verilog-syntax
 SBY         ?= sby
 YOSYS       ?= yosys
 VIVADO      ?= vivado
@@ -90,11 +91,14 @@ VIVADO      ?= vivado
 PYTHON      ?= python3
 COCOTB_CONFIG ?= cocotb-config
 UPDATE_FILES_SCRIPT ?= scripts/update_files_f.py
+RTL_NAMING_CHECKER ?= scripts/check_rtl_naming.py
+RTL_NAMING_POLICY ?= scripts/rtl_naming_policy.json
+VERIBLE_RULES_CONFIG ?= .rules.verible_lint
+VERIBLE_WAIVER_FILE ?= config/verible.waiver
 
 # The full Verible ruleset enforces the lowRISC SystemVerilog style guide's
 # naming, port, register, and formatting conventions.
-VERIBLE_LINT_FLAGS ?= --ruleset=all --rules=-instance-shadowing
-VERIBLE_SUPPRESSED_LINT_MESSAGE := Should be a simple reference, ending with a valid suffix:
+VERIBLE_LINT_FLAGS ?= --ruleset=all --rules=-instance-shadowing --rules_config=$(VERIBLE_RULES_CONFIG) --waiver_files=$(VERIBLE_WAIVER_FILE)
 
 
 # ------------------------------------------------------------------------------
@@ -163,6 +167,15 @@ VERILATOR_FLAGS ?= \
 	--trace \
 	--timing
 
+# Check elaborates the RTL without simulation-only trace generation. TOP takes
+# precedence when supplied, while the complete core remains the default target.
+CHECK_TOP ?= $(or $(TOP),rv32_core)
+VERILATOR_CHECK_FLAGS ?= \
+	-I$(RTL_DIR) \
+	--Wall \
+	--Wno-fatal \
+	--timing
+
 # ------------------------------------------------------------------------------
 # FPGA configuration
 #
@@ -191,6 +204,7 @@ help:
 		'' \
 		'  make help         Show this help text' \
 		'  make all          Run the default workflow (lint)' \
+		'  make check [TOP=<module>]  Elaborate RTL with Verilator' \
 		'  make lint         Run lowRISC-style Verible RTL lint' \
 		'  make lint-strict  Run fatal lowRISC-style Verible RTL lint' \
 		'  make test TOP=<module>  Run the selected module Cocotb test' \
@@ -258,30 +272,28 @@ check-files:
 # Lint
 # ==============================================================================
 
-.PHONY: lint
-lint:
-	@output=$$(mktemp); \
-	$(VERIBLE) $(VERIBLE_LINT_FLAGS) $(RTL_SRCS) >$$output 2>&1; status=$$?; \
-	grep -F -v '$(VERIBLE_SUPPRESSED_LINT_MESSAGE)' $$output || true; \
-	if [ $$status -ne 0 ] && grep -F -q -v '$(VERIBLE_SUPPRESSED_LINT_MESSAGE)' $$output; then \
-		rm -f $$output; exit $$status; \
-	fi; \
-	rm -f $$output
+.PHONY: check
+check:
+	$(VERILATOR) $(VERILATOR_CHECK_FLAGS) --lint-only --top-module $(CHECK_TOP) $(RTL_SRCS)
 
+.PHONY: lint lint-verible lint-naming check-waivers check-tool-compat
+lint: lint-verible lint-naming
 
-# Optional stricter target.
-#
-# Once the codebase stabilizes, this is the target that should ideally pass.
-#
-.PHONY: lint-strict
-lint-strict:
-	@output=$$(mktemp); \
-	$(VERIBLE) $(VERIBLE_LINT_FLAGS) --lint_fatal $(RTL_SRCS) >$$output 2>&1; status=$$?; \
-	grep -F -v '$(VERIBLE_SUPPRESSED_LINT_MESSAGE)' $$output || true; \
-	if [ $$status -ne 0 ] && grep -F -q -v '$(VERIBLE_SUPPRESSED_LINT_MESSAGE)' $$output; then \
-		rm -f $$output; exit $$status; \
-	fi; \
-	rm -f $$output
+lint-verible:
+	$(VERIBLE) $(VERIBLE_LINT_FLAGS) $(SIM_SRCS)
+
+lint-naming:
+	$(PYTHON) $(RTL_NAMING_CHECKER) --policy $(RTL_NAMING_POLICY) $(SIM_SRCS)
+
+check-waivers:
+	@test -f $(VERIBLE_WAIVER_FILE)
+	@! grep -n -E '^[[:space:]]*waive[[:space:]]+' $(VERIBLE_WAIVER_FILE) || \
+		{ echo "Verible waivers require an explicit review before use."; exit 1; }
+
+check-tool-compat:
+	$(VERIBLE) --version
+	$(VERIBLE_SYNTAX) --version
+	$(PYTHON) $(RTL_NAMING_CHECKER) --version
 
 
 # ==============================================================================
@@ -521,6 +533,7 @@ check-tools:
 	@set -e; \
 	for tool in \
 		$(VERIBLE) \
+		$(VERIBLE_SYNTAX) \
 		$(SBY) \
 		$(YOSYS) \
 		$(PYTHON) \

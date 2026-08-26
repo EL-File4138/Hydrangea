@@ -1,0 +1,5 @@
+# Verible supplies generic SystemVerilog style checks.  Project-specific RTL
+# names are enforced by scripts/check_rtl_naming.py.
+-dff-name-style
+-line-length
+-port-name-suffix
