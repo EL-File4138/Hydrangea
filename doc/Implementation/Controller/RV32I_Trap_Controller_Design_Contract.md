@@ -8,7 +8,7 @@
 
 **CSR register bank:** [RV32I CSR Register Bank Design Contract](../State/RV32I_CSR_Register_Bank_Design_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 ## 1. Boundary and Ownership
 
@@ -29,7 +29,7 @@ For a valid trap with both reads legal, it shall construct four candidate write 
 
 ```text
 mepc          <- pc_i
-mcause        <- {trap_i.interrupt, trap_i.code}
+mcause        <- {trap_i.is_interrupt, trap_i.code}
 mtval         <- trap_i.tval
 mstatus.MPIE  <- old mstatus.MIE
 mstatus.MIE   <- 0
@@ -48,7 +48,7 @@ pc_o = {mtvec[31:2], 2'b00}
 
 It shall assert `legal_o` and `pc_valid_o` only when:
 
-- `trap_i.valid` is asserted;
+- `trap_i.is_valid` is asserted;
 - both required CSR reads are legal; and
 - all four candidate CSR write lanes are legal.
 
@@ -56,7 +56,7 @@ An invalid trap or an illegal required read shall suppress every write candidate
 
 ## 4. Core Integration
 
-Core shall invoke this boundary only for the retained report selected for `TRAP`. An accepted trap transaction shall take priority over every retained normal CSR candidate and shall be committed atomically through the bank's global transaction enable. Core shall update its PC from `pc_o` only when `pc_valid_o` is asserted.
+Core shall invoke this boundary only for the retained report selected for `TRAP`. An accepted trap transaction shall take priority over every ordinary CSR candidate derived from the active instruction and shall be committed atomically through the bank's global transaction enable. Core shall update its PC from `pc_o` only when `pc_valid_o` is asserted.
 
 The controller is a trap-entry candidate generator, not a dedicated architectural trap handler. Core continues to own source qualification, sequencing, precise normal-effect suppression, and the transition back to `FETCH`.
 
@@ -68,4 +68,4 @@ Verification shall cover exception and interrupt `mcause` formation, fault-PC an
 
 - Document type: module contract
 - RTL authority: `rtl/core/ctrl/rv32_trap.sv`, `rtl/core/type/rv32_trap_pkg.sv`, and `rtl/core/type/rv32_csr_pkg.sv`
-- Verification authority: `testbench/cocotb/test-rv32_trap.py` and later Core integration tests
+- Verification authority: `testbench/cocotb/test-rv32_trap.py` and the passing directed Core regressions

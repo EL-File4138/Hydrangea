@@ -8,7 +8,7 @@
 
 **CSR controller:** [RV32I CSR/SYSTEM Design Contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 ## 1. Purpose
 
@@ -72,9 +72,9 @@ A CSR-specific write lane is described by the shared write type, conceptually:
 
 ```systemverilog
 typedef struct packed {
-    logic        en;
-    logic [11:0] addr;
-    logic [31:0] wdata;
+    logic        write_enable;
+    logic [11:0] address;
+    logic [31:0] write_data;
 } csr_write_t;
 ```
 
@@ -89,7 +89,7 @@ The complete atomic transaction is legal only if:
 
 Duplicate physical-cell writes are an interface-contract violation and shall not be resolved by lane priority.
 
-The global write-enable/commit signal is distinct from the per-lane semantic `wr_en` request. Per-lane `wr_en` tells the CSR implementation to evaluate a write operation; the bank-level global write-enable determines whether the already-evaluated atomic transaction is committed.
+The global write-enable/commit signal is distinct from the per-lane semantic `write_enable` request. Per-lane `write_enable` tells the CSR implementation to evaluate a write operation; the bank-level global write-enable determines whether the already-evaluated atomic transaction is committed.
 
 ---
 
@@ -145,10 +145,10 @@ typedef enum int unsigned {
     IDX_MIMPID,
     IDX_MHARTID,
     IDX_MCONFIGPTR,
-    NUM_CSRS
-} csr_idx_t;
+    CSR_COUNT
+} csr_index_e;
 
-logic [31:0] reg_cell [0:NUM_CSRS-1];
+logic [31:0] reg_cell [0:CSR_COUNT-1];
 ```
 
 The architectural address enum and the physical-cell index enum are distinct concepts.
@@ -173,7 +173,7 @@ Conceptually:
 function automatic csr_rsp_t csr_dispatch(
     input logic [11:0] addr,
     input csr_req_t    req,
-    const ref logic [31:0] reg_cell [0:NUM_CSRS-1]
+    const ref logic [31:0] reg_cell [0:CSR_COUNT-1]
 );
 ```
 
@@ -193,7 +193,7 @@ CSR-specific behavior shall be separated into a dedicated implementation package
 rv32_csr_pkg.sv
     common CSR types and enums
 
-rv32_csr_impl_pkg.sv
+rv32_csr_implementation_pkg.sv
     csr_mstatus()
     csr_misa()
     csr_mie()
@@ -205,7 +205,7 @@ rv32_csr_impl_pkg.sv
     csr_mip()
     identification/configuration CSR functions
 
-rv32_csrreg.sv
+rv32_csr_register_bank.sv
     physical storage
     address dispatch
     read/write port handling
@@ -228,11 +228,11 @@ Conceptually:
 
 ```systemverilog
 typedef struct packed {
-    logic        legal;
-    logic [31:0] rdata;
-    logic [31:0] next;
-    logic        cell_valid;
-    csr_idx_t    cell_idx;
+    logic        is_legal;
+    logic [31:0] read_data;
+    logic [31:0] value_candidate;
+    csr_index_e  cell_index;
+    logic        cell_is_valid;
 } csr_rsp_t;
 ```
 
@@ -246,23 +246,23 @@ The shared request type shall include at least:
 
 ```systemverilog
 typedef struct packed {
-    logic        wr_en;
-    logic        rst_en;
-    logic [31:0] wdata;
+    logic        write_enable;
+    logic        reset_enable;
+    logic [31:0] write_data;
 } csr_req_t;
 ```
 
 The intended meanings are:
 
-- `wr_en`: evaluate this access as a CSR write operation;
-- `rst_en`: evaluate the implementation-defined reset behavior for this CSR;
-- `wdata`: candidate write data for a normal write operation.
+- `write_enable`: evaluate this access as a CSR write operation;
+- `reset_enable`: evaluate the implementation-defined reset behavior for this CSR;
+- `write_data`: candidate write data for a normal write operation.
 
-`wr_en` and `rst_en` are mutually exclusive semantic operations.
+`write_enable` and `reset_enable` are mutually exclusive semantic operations.
 
 A pure read uses both deasserted.
 
-The candidate `rsp.next` value does **not** itself imply a state write. It is only the state that would result if the parent bank commits a valid write/reset operation.
+The candidate `rsp.value_candidate` value does **not** itself imply a state write. It is only the state that would result if the parent bank commits a valid write/reset operation.
 
 Normal state commitment occurs only when the bank-level transaction is enabled and the atomic transaction is legal.
 
@@ -278,14 +278,14 @@ During reset, the bank constructs internal requests with:
 
 ```systemverilog
 req = '0;
-req.rst_en = 1'b1;
+req.reset_enable = 1'b1;
 ```
 
-and invokes the same CSR dispatcher for every implemented CSR cell. The resulting `rsp.next` values are synchronously loaded into `reg_cell[]` by the bank's reset branch.
+and invokes the same CSR dispatcher for every implemented CSR cell. The resulting `rsp.value_candidate` values are synchronously loaded into `reg_cell[]` by the bank's reset branch.
 
 This keeps the parent sequential logic generic while allowing each CSR implementation to define its own architecturally correct reset state.
 
-A separate external reset-enable signal is not required; `rst_en` is an internal member of `csr_req_t` used to select per-CSR reset semantics.
+A separate external reset-enable signal is not required; `reset_enable` is an internal member of `csr_req_t` used to select per-CSR reset semantics.
 
 The current reset values are frozen as follows:
 
@@ -311,7 +311,7 @@ typedef enum logic [2:0] {
     WPRI,
     WARL,
     WLRL
-} csr_sem_t;
+} csr_semantics_e;
 ```
 
 The semantic categories are interpreted as follows:
@@ -359,7 +359,7 @@ Each read port constructs a read request with no write/reset action and invokes 
 
 All read ports are combinational.
 
-The returned `legal` value indicates whether the addressed CSR read is implemented and architecturally permitted. The returned `rdata` is the architectural CSR value after per-field read semantics have been applied.
+The returned `is_legal` value indicates whether the addressed CSR read is implemented and architecturally permitted. The returned `read_data` is the architectural CSR value after per-field read semantics have been applied.
 
 The four read ports are independent but observe the same pre-edge CSR state.
 
@@ -370,19 +370,19 @@ The four read ports are independent but observe the same pre-edge CSR state.
 Each enabled write lane constructs a request using:
 
 ```systemverilog
-req.wr_en = wr_i[w].en;
-req.rst_en = 1'b0;
-req.wdata = wr_i[w].wdata;
+req.write_enable = wr_i[w].write_enable;
+req.reset_enable = 1'b0;
+req.write_data = wr_i[w].write_data;
 ```
 
-The global bank transaction-enable signal shall **not** be folded into `req.wr_en`; semantic evaluation and transaction commitment are separate concerns.
+The global bank transaction-enable signal shall **not** be folded into `req.write_enable`; semantic evaluation and transaction commitment are separate concerns.
 
 Each lane is dispatched combinationally. After all lane responses are available, the bank computes whole-transaction legality from:
 
-- per-lane `rsp.legal`; and
+- per-lane `rsp.is_legal`; and
 - duplicate physical-cell detection.
 
-If the whole transaction is legal and globally enabled, every enabled lane commits its `rsp.next` value to its resolved physical cell on the same rising edge.
+If the whole transaction is legal and globally enabled, every enabled lane commits its `rsp.value_candidate` value to its resolved physical cell on the same rising edge.
 
 ---
 
@@ -418,7 +418,7 @@ The following CSRs are selected for the current core.
 | `marchid` | `0xF12` | hardwired zero initially |
 | `mimpid` | `0xF13` | hardwired zero initially |
 | `mhartid` | `0xF14` | hardwired zero for single-hart implementation |
-| `mconfigptr` | `0xF15` | hardwired zero when no configuration structure is provided |
+| `mconfigptr` | `0xF15` | baseline read-only zero; future SoC platform-description pointer requires an explicit implementation update |
 
 These low-cost CSRs shall be implemented now because they improve specification-facing completeness with minimal RTL complexity.
 
@@ -466,7 +466,7 @@ PC   <- mepc
 
 ### `mcause`
 
-- hardware trap entry writes `{interrupt, code}`;
+- hardware trap entry writes `{is_interrupt, code}`;
 - software-visible and writable according to the selected implementation policy;
 - Exception Code field obeys WLRL semantics.
 
@@ -563,7 +563,7 @@ Conversely, the CSR controller is not a mandatory transit point for every CSR wr
 
 ## 19. Validation Status
 
-The dedicated CSR register-bank regression at `testbench/cocotb/test-rv32_csrreg.py` passes **6/6** tests. It verifies:
+The dedicated CSR register-bank regression at `testbench/cocotb/test-rv32_csr_register_bank.py` passes **6/6** tests. It verifies:
 
 - contract-defined reset values;
 - writable-field filtering and address alignment;
@@ -583,7 +583,7 @@ The following invariants are frozen by this contract:
 4. Duplicate writes to one physical CSR cell in one atomic transaction are forbidden.
 5. All CSR state mutation occurs in the parent bank's sequential logic.
 6. Per-CSR implementation functions are pure combinational semantic transforms from `(request, current)` to `response`.
-7. Per-CSR reset behavior resides with the per-CSR implementation function and is selected using `csr_req_t.rst_en`.
+7. Per-CSR reset behavior resides with the per-CSR implementation function and is selected using `csr_req_t.reset_enable`.
 8. Architectural CSR addresses are dispatched through one reusable `case` function.
 9. Physical CSR storage is dense and contains only implemented cells; the 4096-address architectural CSR space is not instantiated as storage.
 10. Unimplemented CSR addresses are handled by dispatch fall-through and yield an illegal access.
@@ -593,16 +593,17 @@ The following invariants are frozen by this contract:
 ## Related Documents
 
 - [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
-- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [Core design contract](../RV32I_Core_Design_Contract.md)
 - [Core-owned state contract](RV32I_Core_Owned_State_Design_Contract.md)
 - [CSR/SYSTEM controller contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
 - [Trap controller contract](../Controller/RV32I_Trap_Controller_Design_Contract.md)
 - [Instruction decoder contract](../Controller/RV32I_Instruction_Decoder_Design_Contract.md)
 - [Exceptions, traps, and extensions roadmap](../../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+- [SoC and platform roadmap](../../Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
 
 ## Metadata
 
 - Document type: module contract
 - Authority: CSR register-bank topology, transaction semantics, implemented address set, and per-CSR storage boundary
-- RTL authority: `rtl/core/reg/rv32_csrreg.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_csr_impl_pkg.sv`
-- Verification authority: `testbench/cocotb/test-rv32_csrreg.py` and later Core integration tests
+- RTL authority: `rtl/core/reg/rv32_csr_register_bank.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_csr_implementation_pkg.sv`
+- Verification authority: `testbench/cocotb/test-rv32_csr_register_bank.py` and the passing directed Core regressions

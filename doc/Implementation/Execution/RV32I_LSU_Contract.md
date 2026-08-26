@@ -6,7 +6,7 @@
 
 **Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 **Memory contract:** [RV32I Memory Subsystem Design Contract](../IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
@@ -48,7 +48,7 @@ The LSU shall own:
 
 ### 3.3 Adapters
 
-The IMEM and DMEM adapters shall own architectural-range validation, physical address mapping, backend sequencing, latency, and backend error detection. The LSU shall translate adapter errors into architectural access-fault reports and shall not issue backend-local addresses or signals.
+The IMEM and DMEM adapters shall own unified-address-map validation, physical address mapping, backend sequencing, latency, and backend error detection. The LSU shall translate adapter errors into architectural access-fault reports and shall not issue backend-local addresses or signals.
 
 ## 4. Core-Facing Semantics
 
@@ -68,7 +68,7 @@ A successful load result shall be a fully selected and sign- or zero-extended 32
 
 ## 5. Adapter-Facing Data Convention
 
-The LSU shall be a requester on independent IMEM and DMEM instances of `rv32_mem_if`.
+The LSU shall be a requester on independent logical IMEM and DMEM instances of `rv32_mem_if`. Both carry addresses from the same architectural address space and may terminate in one physical memory through SoC/platform routing.
 
 For writes, `wdata` shall be positioned in the destination architectural byte lanes, and each asserted `wstrb` bit shall identify the corresponding valid byte lane. Adapters may translate this representation into backend-native byte enables but shall not reconstruct ISA store semantics.
 
@@ -94,12 +94,12 @@ The LSU shall expose `if_trap_o` and `data_trap_o`, each typed as `rv32_trap_pkg
 
 | Field | Meaning |
 | --- | --- |
-| `valid` | A trap is reported for the active transaction |
-| `interrupt` | Trap class; always clear for LSU-generated reports |
+| `is_valid` | A trap is reported for the active transaction |
+| `is_interrupt` | Trap class; always clear for LSU-generated reports |
 | `code[30:0]` | Architectural exception cause |
 | `tval[31:0]` | Architectural trap value; the faulting address for memory faults |
 
-Every reported LSU trap shall have `valid = 1` and `interrupt = 0`. The LSU shall report:
+Every reported LSU trap shall have `is_valid = 1` and `is_interrupt = 0`. The LSU shall report:
 
 | Condition | Cause | `tval` |
 | --- | --- | --- |

@@ -4,7 +4,7 @@ An ongoing implementation of a simply explainable, specification-compliant, rese
 
 ## Status
 
-This is a work in progress, not a complete processor or FPGA-ready system. The repository currently provides independently tested implementation blocks for instruction decode, immediate generation, ALU operations, register-file behavior, synchronous RAM, and controller development. An integrated instruction-fetch, execution, load/store, trap, and board-level system is still under construction.
+This is a work in progress, not a conformance-proven processor or FPGA-ready system. An integrated multicycle Core is authored, passes the Verilator `--lint-only` elaboration check, and passes its directed Core regressions. Board integration, broader Core verification, architectural compliance evidence, and interrupt support remain under construction.
 
 Do not use this repository as a conformance-proven CPU core or in safety-, security-, or mission-critical hardware.
 
@@ -12,16 +12,17 @@ Do not use this repository as a conformance-proven CPU core or in safety-, secur
 
 - Base ISA:          RV32I
 - Target Deployment: FPGA Bare-metal
-- Extensions:        Zicsr; Zifencei deferred
+- Extensions:        Zicsr; Zifencei out of scope without a runtime self-modifying-code requirement
 - Privilege:         M-mode only
 - Endianness:        Little-endian
 - Instruction width: 32-bit only; IALIGN=32
 - Misaligned access: Trap; never emulate in hardware
-- Trap vector:       Direct mode only
-- Interrupts:        Machine timer interrupt only
+- Trap vector:       Direct baseline; Vectored mode planned with the timer milestone
+- Interrupts:        Machine timer interrupt planned; not yet implemented
 - Memory system:     No caches, MMU, coherency, or speculation
+- Address space:     One unified 32-bit architectural space
 - Execution:         In-order, one instruction in flight
-- External bus:      Separate instruction/data ready-valid interfaces
+- External bus:      Separate logical instruction/data ready-valid interfaces
 - Outstanding ops:   At most one on each interface
 - RTL:               Synthesizable SystemVerilog.
 - Verification:      Cocotb regression tests, Verible linting, and a planned SymbiYosys formal flow.
@@ -37,9 +38,10 @@ The RISC-V ISA specification remains the architectural authority. Project-specif
 | `rtl/files.f` | Authoritative root-relative manifest of RTL sources. |
 | `testbench/cocotb/` | Self-checking Cocotb tests for implemented modules. |
 | `formal_verification/` | SymbiYosys jobs as formal properties are added. |
+| `software/` | Startup, linker, and bare-metal demonstration sources. |
 | `constraints/` | FPGA constraint files. |
 | `scripts/` | Manifest, firmware-image, and FPGA-flow support scripts. |
-| `doc/` | Design contract, implementation plans, and extension roadmap. |
+| `doc/` | Architecture, design contracts, execution-environment policy, and roadmaps. |
 
 ## Prerequisites
 
@@ -83,17 +85,20 @@ This project is a personal undertaking and is likely not accepting any contribut
 4. Run `make check-files`, `make lint`, and the relevant `make test TOP=<module>` command in the activated EDA environment.
 5. Add a formal job for control, protocol, or safety properties where exhaustive proof is practical.
 
-The repository configures Git to use `.githooks/`. The pre-commit hook checks that the checked-in RTL manifest is current and run the validation commands above before committing to ensure basic syntax confrontance.
+The repository configures Git to use `.githooks/`. The pre-commit hook checks Python formatting, refreshes source manifests, runs RTL lint, and cleans generated output. Run the relevant validation commands above before committing.
 
 ## RTL Conventions
 
-RTL follows the [lowRISC Verilog Coding Style Guide](https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md). Use SystemVerilog constructs such as `logic`, `always_comb`, and `always_ff`; lower-snake-case identifiers; typed UpperCamelCase parameters; `_i` and `_o` port suffixes; and `_q`/`_d` state naming. RTL modules use explicit widths, named port connections, and `` `default_nettype none``.
+RTL naming is governed by the [project naming contract](doc/Philosophy/RV32I_RTL_Naming_Contract.md), which specializes [lowRISC Verilog Coding Style Guide](https://github.com/lowRISC/style-guides/blob/master/VerilogCodingStyle.md). Use SystemVerilog constructs such as `logic`, `always_comb`, and `always_ff`; lower-snake-case identifiers; typed parameters and constants; explicit semantic predicate names; ordinary port-direction suffixes; and `_q`/`_d` scalar-state naming. RTL modules use explicit widths, named port connections, and `` `default_nettype none``.
 
 ## Documentation
 
 - [Core architecture](doc/Philosophy/RV32I_Core_Architecture.md)
-- [Execution-environment contract](doc/Philosophy/RV32I_Execution_Environment_Contract.md), [configuration/profile amendment](doc/RV32I_Execution_Environment_Profile_Amendment.md), and [deferred decisions](doc/Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md)
-- [Core implementation](doc/Roadmap/RV32I_Core_Implementation.md)
+- [RTL naming contract](doc/Philosophy/RV32I_RTL_Naming_Contract.md)
+- [Execution-environment contract](doc/Philosophy/RV32I_Execution_Environment_Contract.md)
+- [Software authoring contract](doc/Philosophy/RV32I_Software_Authoring_Contract.md)
+- [SoC and platform roadmap](doc/Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
+- [Core design contract](doc/Implementation/RV32I_Core_Design_Contract.md)
 - [Exceptions, traps, and extensions roadmap](doc/Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 - Controller contracts: [instruction decoder](doc/Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md) and [trap entry](doc/Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md)
 - Execution contracts: [ALU](doc/Implementation/Execution/RV32I_ALU_Design_Contract.md), [CTRL](doc/Implementation/Execution/RV32I_CTRL_Design_Contract.md), [LSU](doc/Implementation/Execution/RV32I_LSU_Contract.md), and [CSR/SYSTEM](doc/Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md)
@@ -103,4 +108,5 @@ RTL follows the [lowRISC Verilog Coding Style Guide](https://github.com/lowRISC/
 ## License
 
 This project is a partial dependency of the ongoing thesis project of author. It may or may not fall under the University's policy regarding intellectual contribution for work conducted under University's regulation, depending on final inclusion.
+
 Please do not assume permission to reuse, distribute, or modify the source until a explicit license announcement is made.

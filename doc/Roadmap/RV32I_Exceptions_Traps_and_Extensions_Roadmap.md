@@ -1,12 +1,18 @@
 # RV32I Exceptions, Traps, and Extensions Roadmap
 
+**Execution environment:** [RV32I Execution-Environment Contract](../Philosophy/RV32I_Execution_Environment_Contract.md)
+
+**Software contract:** [RV32I Software Authoring Contract](../Philosophy/RV32I_Software_Authoring_Contract.md)
+
+**Platform roadmap:** [RV32I SoC and Platform Roadmap](RV32I_SoC_and_Platform_Roadmap.md)
+
 ## Purpose
 
-This document orders work that remains after the established decoder, LSU, CSR, SYSTEM, and standalone trap-controller behavior. Module contracts own implemented semantics; this document owns sequencing and scope control for unexecuted integration and extensions.
+This document orders Core and ISA work across synchronous exceptions, compliance evidence, interrupts, and optional extensions. Module and Core contracts own implemented semantics and evidence; this document owns sequencing, closure criteria, and scope control.
 
 ## Status
 
-This is a planning and scope-control document. It does not claim support merely because work appears in a milestone. Support claims require RTL and test evidence under the project documentation policy.
+This is the plan of record. It does not claim support merely because work appears in a milestone, and it does not duplicate volatile regression counts or concrete implementation snapshots. Support claims require evidence recorded by the applicable implementation contract.
 
 The architectural baseline is the RISC-V Unprivileged ISA, version 20240411. Privileged behavior shall cite an explicit privileged-architecture version when that work begins.
 
@@ -14,8 +20,8 @@ The architectural baseline is the RISC-V Unprivileged ISA, version 20240411. Pri
 
 The recommended order is:
 
-1. freeze the execution-environment mechanisms and per-build profile-completion rule (**complete**);
-2. integrate the established synchronous exception, CSR, and trap controllers into the core;
+1. freeze the execution-environment mechanisms and Core/SoC/image authority split;
+2. integrate the synchronous exception, CSR, and trap controllers into the Core;
 3. complete Core-level verification and applicable architectural tests for the declared base and Zicsr subset;
 4. add the scoped machine timer interrupt;
 5. add optional extensions only when software requirements justify them.
@@ -24,41 +30,44 @@ This order avoids adding interrupts or extensions on top of undefined exception 
 
 ## 2. Stage 1: Execution-Environment Contract
 
-**Status:** Complete at the mechanism and profile-requirement level; each concrete build remains subject to profile closure.
+**Status:** Cross-boundary mechanisms and authority split complete; each SoC/platform and deployment image closes under its governing document.
 
-The [execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md), as clarified by its [configuration/profile amendment](../RV32I_Execution_Environment_Profile_Amendment.md), freezes:
+The [execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md) freezes:
 
-- reset into Machine mode at a configured, aligned, fetchable `ResetVector`;
-- logical Harvard IMEM and DMEM paths using full architectural addresses, with maps and physical topology resolved by each profile;
-- coherent per-build resolution of reset, memory, linker entry, stack, image-loading, and any device values;
-- no required MMIO, host device, timer, or interrupt source for the first pure-Core simulation milestone;
-- explicit access-fault and misalignment behavior;
-- serialized memory execution with base FENCE as a legal no-op;
-- no runtime self-modifying code or FENCE.I; and
-- the placement-independent RV32 ILP32 startup and stack rules needed to link a freestanding image.
+- reset into Machine mode at a platform-configured, aligned, fetchable `ResetVector`;
+- one 32-bit architectural address space behind separate logical IMEM and DMEM Core interfaces;
+- SoC ownership of RAM, ROM, MMIO, permissions, physical topology, reset wiring, and external errors;
+- deployment-image ownership of section layout, stack/heap, `__mtvec_base`, startup, and application handoff;
+- no required MMIO, host device, timer, or interrupt source for a minimal pure-Core deployment;
+- external-error conversion into access faults and local misalignment traps;
+- serialized memory execution with base FENCE as a legal no-op; and
+- application runtime self-modifying code ruled out while Zifencei is absent.
 
-Section 12 maps every Stage 1 question to a frozen mechanism or profile-resolution obligation. The current adapter defaults may still provide a direct-preload, zero-based 256 KiB shared-RAM simulation, but those numerical values are not Core invariants. Every concrete simulation or FPGA build shall satisfy the closure checklist in Section 11 before its software configuration is claimed consistent. Profile-resolved values, implementation-local choices, and absent future facilities are classified in the [execution-environment deferred decisions register](../Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md).
+[Section 12 of the execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md#12-decision-disposition) records each decision's authority. A deployment shall satisfy the contract's [cross-authority closure rules](../Philosophy/RV32I_Execution_Environment_Contract.md#11-cross-authority-closure), the [software contract](../Philosophy/RV32I_Software_Authoring_Contract.md), and the applicable [SoC/platform roadmap](RV32I_SoC_and_Platform_Roadmap.md) milestones before broader support is claimed.
 
-## 3. Established Module Foundation
+## 3. Implementation and Evidence Authority
 
-The following behavior is implemented and directly tested at module boundaries. Its authoritative semantics are in the linked contracts, not this roadmap:
+The linked module contracts define ALU, register-file, decoder, CTRL, LSU, CSR/SYSTEM, CSR-bank, trap-report, and trap-entry semantics. The [Core design contract](../Implementation/RV32I_Core_Design_Contract.md) alone records the concrete FSM mapping, retained-state mapping, RTL integration status, verification commands, and results.
 
-- ALU, register-file, decoder, CTRL, LSU, CSR/SYSTEM controller, and CSR register-bank behavior, including base FENCE, exact SYSTEM forms, Zicsr, MRET, and the current 15 CSR views;
-- one `rv32_trap_pkg::trap_req_t` representation for synchronous reports; and
-- `rv32_trap` construction of four-lane machine trap-entry candidates and Direct-mode `mtvec` selection, with its 4/4 module regression passing.
-
-Core integration remains unimplemented. It must retain and qualify one source report, select the `rv32_trap` transaction only in `TRAP`, commit it atomically, and suppress the trapped instruction's normal PC, GPR, and CSR effects.
+Roadmap sequencing assumes those authorities rather than copying their implementation snapshots. A changed module boundary or Core mapping shall update its implementation contract before this roadmap is used to claim milestone closure.
 
 ## 4. Stage 2: Core Trap and CSR Integration
 
-Required work:
+**Closure authority:** [Core design contract](../Implementation/RV32I_Core_Design_Contract.md).
 
-- implement the five-state Core flow and retained instruction, result, CSR, and trap state;
-- qualify fetch, decoder, CTRL, CSR/SYSTEM, and LSU reports in their defined FSM contexts, with decoder precedence;
-- route accepted `trap_q` and the retained faulting PC through `rv32_trap` during `TRAP`;
-- commit the accepted four-lane transaction atomically and redirect the PC only when `rv32_trap` declares it legal;
-- integrate normal Zicsr and MRET transactions into `COMMIT`; and
-- add Core-level directed tests for precise trap entry, suppression, MRET, and CSR commit rejection.
+Required integrated behavior:
+
+- one active instruction lifetime with invariant instruction identity;
+- deterministic execution semantics and request fields derived from invariant retained state;
+- state-qualified fetch, decoder, CTRL, CSR/SYSTEM, and LSU trap acceptance with decoder precedence;
+- precise separation between ordinary commit and trap entry;
+- atomic legal trap-state commitment and Direct-mode redirection; and
+- fail-closed behavior when a mandatory trap-state update cannot be accepted.
+
+Additional evidence work:
+
+- add broader CSR rejection and architectural instruction coverage;
+- add assertions for lifetime stability, commit exclusivity, and unreachable trap-entry failure.
 
 ## 5. Stage 3: Base and Zicsr Evidence
 
@@ -66,12 +75,14 @@ Run applicable architectural RV32I and Zicsr tests for the declared subset, or d
 
 ## 6. Stage 4: Machine Timer Interrupt
 
-Add the machine timer interrupt only after synchronous traps and the frozen CSR state are stable. Machine external and machine software interrupts require a later scope amendment.
+Add the machine timer interrupt only after synchronous traps and the frozen CSR state are stable and the SoC/platform roadmap defines the timer source. Machine external and machine software interrupts require later scope and concrete hardware requirements.
 
 The single in-scope asynchronous source is the machine timer interrupt.
 
 Required work:
 
+- add Vectored-mode `mtvec` behavior as a project prerequisite for the first interrupt;
+- preserve `__mtvec_base` as the Direct-handler or Vectored-table base under the software contract;
 - define the timer peripheral/source interface and any required synchronization;
 - drive `mip.MTIP` from the timer pending condition;
 - enforce eligibility through `mstatus.MIE && mie.MTIE && mip.MTIP`;
@@ -80,7 +91,7 @@ Required work:
 - capture the next instruction address in `mepc`; and
 - prove that interrupts are taken only at architecturally precise boundaries.
 
-Interrupt requests should reuse `rv32_trap_pkg::trap_req_t`, whose `interrupt` field already distinguishes interrupts from synchronous exceptions.
+Interrupt requests should reuse `rv32_trap_pkg::trap_req_t`, whose `is_interrupt` field already distinguishes interrupts from synchronous exceptions.
 
 ## 7. Stage 5: Optional ISA Extensions
 
@@ -88,7 +99,7 @@ Extensions shall be requirement-driven.
 
 ### 7.1 Zifencei
 
-Add only if instruction memory can observe stale data after writes or if self-modifying code is supported. Required work includes instruction-side invalidation semantics, not only decode.
+Application runtime self-modifying code is out of scope, even when physical memory is writable and executable. Reconsider Zifencei only after a deliberate software requirement exists. Required work then includes complete instruction-visibility and invalidation semantics, not only decode.
 
 ### 7.2 M Extension
 
@@ -136,17 +147,17 @@ Bit-manipulation, counters, debug, floating-point, vector, and supervisor-mode f
 
 | Feature | Remaining work |
 | --- | --- |
-| Core synchronous traps | Integrate source qualification, retained trap state, `rv32_trap`, atomic bank commit, and Direct-mode PC redirection |
-| Core base RV32I and Zicsr | Integrate established FENCE, SYSTEM, CSR, MRET, CTRL, and LSU outcomes; add Core and architectural evidence |
-| Machine timer interrupt | Define source, sampling, arbitration, RTL, and tests |
-| Zifencei | Add with self-modifying-code requirement |
+| Core synchronous traps | Maintain integration evidence in the Core contract; add assertions and broader boundary tests |
+| Core base RV32I and Zicsr | Establish applicable architectural and software evidence |
+| Machine timer interrupt | Define SoC source; add Vectored mode, sampling, arbitration, RTL, software, and tests |
+| Zifencei | Out of scope until a runtime self-modifying-code requirement exists |
 | M | Add if software or performance requires it |
 | C | Requires fetch redesign |
 | A | Requires memory-system atomicity design |
 
 ## 9. Integration Policy
 
-Core integration shall preserve the source ownership defined by the decoder, CTRL, LSU, CSR/SYSTEM, and memory contracts. It shall qualify only the source applicable to the current FSM state and selected execution class; a decoder trap shall prevent specialist dispatch. Any added priority beyond that established ordering requires an explicit contract update.
+Core integration preserves the source ownership defined by the decoder, CTRL, LSU, CSR/SYSTEM, and memory contracts. It qualifies only the source applicable to the current FSM state and selected execution class. A decoder trap suppresses architectural acceptance of specialist results, though combinational evaluation need not be physically gated. Any added priority beyond the contracted ordering requires an explicit contract update.
 
 ## 10. Software and Compliance Strategy
 
@@ -178,30 +189,40 @@ Toolchain flags and ISA strings shall match implemented extensions exactly.
 
 ### Milestone A: Freeze the Environment
 
-Deliverables:
+**Authority baseline:** Cross-boundary mechanisms and the authority split are frozen; SoC and image closure remain deployment-specific.
 
-- memory map;
-- reset vector;
-- MMIO contract;
-- linker script;
-- startup assumptions.
+Frozen deliverables:
+
+- platform-configured `ResetVector` mechanism;
+- one unified architectural address space with logical IMEM/DMEM ports;
+- SoC ownership of maps, permissions, devices, reset, and discovery;
+- deployment-image ownership of layout, startup, traps, and application handoff; and
+- cross-authority closure criteria for reset, access, fault, loading, and handoff.
+
+Concrete SoC work now proceeds under the [SoC/platform roadmap](RV32I_SoC_and_Platform_Roadmap.md); image work proceeds under the [software contract](../Philosophy/RV32I_Software_Authoring_Contract.md).
 
 ### Milestone B: Integrate Precise Synchronous Traps
 
-Deliverables:
+Closure deliverables:
 
 - shared report integration across the decoder, LSU, CTRL, CSR/SYSTEM controller, `rv32_trap`, and core;
 - state-qualified source selection with decoder-trap precedence;
 - five-state core flow with retained trap metadata;
 - `rv32_trap` candidate acceptance, atomic bank commit, and Direct trap-vector control transfer;
-- established illegal-instruction, access-fault, and misalignment reports; and
-- directed proof that trapped instructions cannot perform normal commit.
+- illegal-instruction, access-fault, and misalignment reports; and
+- evidence that trapped instructions cannot perform normal commit.
+
+Remaining evidence:
+
+- assertions for lifetime stability, commit exclusivity, and unreachable trap-entry failure; and
+- broader boundary and architectural evidence under Milestone C.
 
 ### Milestone C: Establish Core-Level Base and Zicsr Evidence
 
 Deliverables:
 
-- Core tests for FENCE, SYSTEM, Zicsr, and MRET;
+- directed Core evidence for FENCE, SYSTEM, Zicsr, and MRET;
+- delayed-memory/backpressure and fail-closed trap-entry evidence;
 - applicable architectural tests or documented exclusions; and
 - trap software tests.
 
@@ -209,6 +230,8 @@ Deliverables:
 
 Deliverables:
 
+- SoC timer source and platform ABI completed under the SoC/platform roadmap;
+- Vectored-mode `mtvec` and trap-target selection;
 - timer path;
 - hardware-driven `MTIP` and `MIE && MTIE && MTIP` eligibility;
 - a defined sampling and arbitration point;
@@ -233,17 +256,19 @@ A feature may be listed as supported only when:
 
 Planned, partial, and supported are distinct statuses.
 
-## 13. Open Profile and Architecture Work
+## 13. Open Core and Extension Work
 
-The following remain open until an implementation plan, concrete profile, or decision record resolves them. Profile-resolved values do not represent unresolved Core architecture:
+Platform maps, devices, discovery, reset wiring, and image transport are tracked by the [SoC/platform roadmap](RV32I_SoC_and_Platform_Roadmap.md). Linker, startup, stack/heap, trap-symbol, UART-shim, and application-handoff work is tracked by the [software contract](../Philosophy/RV32I_Software_Authoring_Contract.md).
 
-- concrete reset, boot, memory, MMIO, and device values for any additional platform profile, under the mechanisms and closure rule in the [deferred decisions register](../Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md);
-- machine timer interface, synchronization, sampling, and priority;
+The remaining Core/ISA work is:
+
+- Vectored-mode trap support and machine-timer interface, synchronization, sampling, and priority;
 - `mcycle`, `minstret`, their RV32 high halves, and `mcountinhibit` after retirement signaling is stable;
 - whether atomic operations are required;
 - whether compressed instructions are required;
-- whether instruction-cache or self-modifying-code support is required;
 - which privileged-architecture version governs machine-mode work.
+
+Caches, speculative or out-of-order memory behavior, parallel Core transactions, multiple harts, lower privilege modes, PMP, MMU, virtual memory, coherent/cache-visible independent masters, and runtime self-modifying code are baseline non-goals rather than open profile decisions.
 
 ## References
 
@@ -253,9 +278,9 @@ The following remain open until an implementation plan, concrete profile, or dec
 - [RISC-V Compliance Working Group repositories](https://github.com/riscv-non-isa)
 - [Core architecture](../Philosophy/RV32I_Core_Architecture.md)
 - [Execution-environment contract](../Philosophy/RV32I_Execution_Environment_Contract.md)
-- [Execution-environment configuration/profile amendment](../RV32I_Execution_Environment_Profile_Amendment.md)
-- [Execution-environment deferred decisions](../Philosophy/RV32I_Execution_Environment_Deferred_Decisions.md)
-- [Core implementation](RV32I_Core_Implementation.md)
+- [Software authoring contract](../Philosophy/RV32I_Software_Authoring_Contract.md)
+- [SoC and platform roadmap](RV32I_SoC_and_Platform_Roadmap.md)
+- [Core design contract](../Implementation/RV32I_Core_Design_Contract.md)
 - [Instruction decoder contract](../Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md)
 - [Trap controller contract](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md)
 - [ALU contract](../Implementation/Execution/RV32I_ALU_Design_Contract.md)
@@ -271,4 +296,4 @@ The following remain open until an implementation plan, concrete profile, or dec
 
 - Document type: roadmap
 - Scope: exceptions, traps, machine mode, interrupts, base-ISA completion, and optional extensions
-- Evidence policy: Section 12 of this roadmap
+- Evidence policy: Section 12 of this roadmap; concrete results remain in the Core and module implementation contracts

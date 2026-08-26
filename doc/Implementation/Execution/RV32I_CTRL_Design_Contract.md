@@ -4,7 +4,7 @@
 
 **Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 ## 1. Purpose
 
@@ -14,11 +14,11 @@ The terms **shall**, **shall not**, and **may** denote a requirement, a prohibit
 
 ## 2. Operand Boundary
 
-`rv32_instdec` emits architectural `rs1` and `rs2` indices. The core shall perform register-file lookup and route the resulting register contents to CTRL.
+`rv32_inst_decoder` emits architectural `rs1` and `rs2` indices. The core shall perform register-file lookup and route the resulting register contents to CTRL.
 
 CTRL shall consume 32-bit operand values, not register indices. Its register-sourced inputs therefore represent values such as `operand_a_i` and `operand_b_i`; CTRL shall not access the register file or infer a register identifier from either value.
 
-CTRL shall emit raw 32-bit result values. It shall not receive or emit an architectural destination-register index, select a destination register, or authorize register-file writeback. The core shall retain the decoded destination index and write authorization and shall route CTRL's register-result value when required.
+CTRL shall emit raw 32-bit result values. It shall not receive or emit an architectural destination-register index, select a destination register, or authorize register-file writeback. The core shall preserve destination and write authorization through invariant retained instruction state and shall route CTRL's register-result value when required.
 
 Typed operation selection is not an architectural data operand and remains part of the CTRL request.
 
@@ -76,10 +76,10 @@ The CTRL trap candidate shall use `rv32_trap_pkg::trap_req_t`; the eventual RTL 
 For the baseline without compressed instructions, a taken target with `next_pc[1:0] != 2'b00` shall report a `rv32_trap_pkg::trap_req_t` candidate equivalent to:
 
 ```text
-valid     = 1
-interrupt = 0
-code      = EXC_INST_ADDR_MISALIGNED
-tval      = attempted next PC
+is_valid     = 1
+is_interrupt = 0
+code         = EXC_INST_ADDR_MISALIGNED
+tval         = attempted next PC
 ```
 
 A not-taken conditional branch shall not report an alignment trap for its unused branch target. A normal CTRL result shall have trap validity clear.

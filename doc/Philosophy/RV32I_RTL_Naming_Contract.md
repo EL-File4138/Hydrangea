@@ -64,7 +64,7 @@ An identifier shall not end in an underscore followed by a number. Pipeline suff
 
 One compilation unit should contain one primary declaration, and its filename shall match that declaration.
 
-The `rv32_` prefix denotes membership in the implemented RV32 Core, not membership in this repository. RTL that constitutes the Core shall use the prefix; the current enforcement scope is `rtl/core/**/*.sv`. Supporting memories, adapters, platform RTL, and testbench modules are outside that mandatory prefix scope. Reusable non-Core RTL should omit `rv32_`; an RV32-specific wrapper or adapter outside `rtl/core/` may retain it when the token describes its actual ABI rather than satisfying a repository-wide rule.
+The `rv32_` prefix denotes membership in the implemented RV32 Core, not membership in this repository. RTL that constitutes the Core shall use the prefix; the mandatory enforcement scope is `rtl/core/**/*.sv`. Supporting memories, adapters, platform RTL, and testbench modules are outside that mandatory prefix scope. Reusable non-Core RTL should omit `rv32_`; an RV32-specific wrapper or adapter outside `rtl/core/` may retain it when the token describes its actual ABI rather than satisfying a repository-wide rule.
 
 `RVNAME001` enforces the filename prefix only inside the configured Core RTL roots. `RVNAME002` applies the matching module-name requirement only to modules declared in those roots. Neither rule shall use a global `.sv` check or a list of one-off filename exceptions.
 
@@ -142,7 +142,7 @@ A modport-typed, mixed-direction interface port is the sole exception to ordinar
 
 ```systemverilog
 rv32_mem_if.requester imem_if;
-rv32_mem_if.responder dmem_if;
+rv32_mem_if.requester dmem_if;
 ```
 
 Interface declarations shall end in `_if`. Interface instances and interface ports shall use a channel or role stem followed by `_if`. Modports shall use role nouns such as `requester` and `responder`; the existing `respondend` spelling is invalid.
@@ -205,8 +205,8 @@ Every enum member shall be `ALL_CAPS` and shall carry the shortest registered ro
 | LSU operation | `LSU_` |
 | Control-transfer operation | `CONTROL_` |
 | CSR operation/access/address/index | `CSR_`, refined where needed |
-| Writeback source | `WB_` |
-| PC source | `PC_` |
+| Writeback source | `WRITEBACK_SOURCE_` |
+| PC source | `PC_SOURCE_` |
 | Exception code | `EXC_` |
 | Interrupt code | `INT_` |
 | Module-local single FSM | `ST_` |

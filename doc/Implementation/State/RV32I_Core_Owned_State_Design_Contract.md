@@ -2,68 +2,84 @@
 
 **Scope:** Persistent instruction-lifetime, pending-result, trap, and sequencing state owned directly by `rv32_core`
 
-**Status:** Contracted; Core RTL integration pending
-
-**Execution environment:** [RV32I Execution-Environment Contract](../../Philosophy/RV32I_Execution_Environment_Contract.md)
+**Status:** Implemented in Core RTL; directed state-lifetime regressions pass
 
 **Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
+
+**Core contract:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 **Register file:** [RV32I Register File Design Contract](RV32I_Register_File_Design_Contract.md)
 
 **CSR bank:** [RV32I CSR Register Bank Design Contract](RV32I_CSR_Register_Bank_Design_Contract.md)
 
-**Core implementation:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
-
 ## 1. Ownership Boundary
 
-Core-owned state is state required to sequence one in-flight instruction but not owned by the register file, CSR bank, memory backend, or a combinational execution/controller module.
+Core-owned state sequences one in-flight instruction but is not architectural storage owned by the register file, CSR bank, or memory backend.
 
-The minimum retained set comprises:
+The implemented persistent set is:
 
-- architectural instruction PC;
-- current instruction and decoded semantic record;
-- retained source operands and destination/write intent;
-- pending normal GPR result and next PC;
-- pending CSR write candidate where required;
-- retained `trap_req_t` report;
-- active memory-request fields while a transaction is outstanding; and
-- the Core FSM state.
+```systemverilog
+core_state_e state_q;
+logic [31:0] pc_q;
+logic [31:0] next_pc_q;
+logic [31:0] instruction_q;
+logic [31:0] rd_value_q;
+rv32_trap_pkg::trap_req_t trap_q;
+```
 
-Concrete register names and packing may differ from the implementation plan, but ownership and lifetime shall remain explicit.
+Core does not retain separate decoded semantics, source operands, destination intent, ordinary CSR candidates, or LSU request fields. Those values may remain combinational when they are deterministic functions of state that cannot change before final use.
 
-## 2. Instruction-Lifetime Rules
+## 2. Lifetime Rules
 
-The retained PC and instruction shall identify the same instruction throughout `EXECUTE` and `LSU_WAIT`. Once an instruction or data request is active, every request field shall remain stable until completion.
+`pc_q` and `instruction_q` shall identify the same active instruction from successful fetch capture until normal commit or trap entry supersedes it.
 
-Core may capture operand values and pending normal results before `COMMIT`, but capture shall not itself constitute architectural commitment. A qualified trap shall invalidate or supersede every pending normal effect from the faulting instruction.
+Every non-retained value consumed across states shall remain a deterministic function of invariant retained state. In the current implementation:
 
-The selected trap report shall be retained before leaving its reporting state and shall remain stable through trap-entry qualification in `TRAP`.
+- decoder semantics derive from stable `instruction_q`;
+- register-file source addresses derive from those stable semantics;
+- source values remain stable because no normal GPR write occurs before commit;
+- LSU request fields derive from stable semantics, source values, and immediate; and
+- ordinary CSR/SYSTEM candidates derive from stable instruction/operand state and current bank responses.
+
+Explicit request or operand registers are optional while these stability properties hold.
+
+`next_pc_q` and `rd_value_q` retain normal values only when entering `ST_COMMIT`. `trap_q` captures the complete accepted report before entering `ST_TRAP` and remains stable through trap-entry qualification.
 
 ## 3. State Update Boundaries
 
-- Reset shall select `FETCH`, initialize the PC from the configured reset vector, and clear pending normal and trap intent.
-- `FETCH` may capture a successfully returned instruction or a fetch trap, but shall not commit a normal instruction result.
-- `EXECUTE` may capture operands, normal candidates, an LSU request, or a selected trap report.
-- `LSU_WAIT` shall retain the active request and may capture only its successful result or trap completion.
-- `COMMIT` is the only normal path that may update the architectural PC, GPR file, or instruction-directed CSR state.
-- `TRAP` is the only path that may authorize the selected trap-entry CSR transaction and exceptional PC update.
+| State/boundary | Permitted Core-owned update or architectural authorization |
+| --- | --- |
+| Reset | Select `ST_FETCH`, initialize `pc_q` from configured `ResetVector`, and clear `trap_q` |
+| `ST_FETCH` | Capture a returned instruction or accepted fetch trap |
+| `ST_EXECUTE` | Capture pending normal results or an accepted trap |
+| `ST_IO_WAIT` | Preserve derived request inputs; capture successful data result or accepted data trap |
+| `ST_COMMIT` | Authorize normal PC, GPR, and instruction-directed CSR state updates |
+| `ST_TRAP` | Authorize trap-entry CSR state and exceptional PC update |
 
-The architectural PC shall change only on reset, accepted normal commit, or accepted trap entry.
+Uninitialized `instruction_q`, `next_pc_q`, and `rd_value_q` values are invalidated by the FSM after reset. They shall not be consumed until a valid producer transition has written them.
 
-## 4. Separation from Other State Owners
+## 4. Separation from Architectural State
 
-The [register-file contract](RV32I_Register_File_Design_Contract.md) owns GPR cell behavior. The [CSR-bank contract](RV32I_CSR_Register_Bank_Design_Contract.md) owns CSR cells and atomic commitment. Core-owned registers retain only the metadata and candidates needed to authorize those state owners at the correct boundary.
+The register file owns GPR cells and architectural `x0` preservation. The CSR bank owns CSR cells, legality, and atomic commitment. Core-owned state retains only instruction identity and candidates needed to authorize those state owners at the correct boundary.
 
-Combinational ALU, CTRL, CSR/SYSTEM, decoder, and trap-controller outputs shall not be treated as persistent state unless Core explicitly captures them.
+Combinational outputs are not persistent state, but they may be consumed in later states when their retained basis remains invariant. Capturing a candidate does not itself constitute architectural commitment.
 
-## 5. Invariants and Verification
+## 5. Verification
 
-Verification shall demonstrate instruction/PC coherence, request stability under backpressure, single normal commit, trap retention, mutual exclusion of `COMMIT` and `TRAP`, suppression of all normal effects after a qualified trap, and reset clearing of pending intent.
+Verification shall demonstrate:
 
-Assertions should encode these lifetime and update-boundary properties directly in `rv32_core`.
+- instruction/PC coherence;
+- derived request stability under backpressure;
+- valid-before-use behavior after reset;
+- single normal commit;
+- trap retention and fail-stop behavior on illegal trap entry;
+- mutual exclusion of `ST_COMMIT` and `ST_TRAP`; and
+- suppression of every normal effect after a qualified trap.
+
+The canonical directed-test results are maintained in [Section 12 of the Core contract](../RV32I_Core_Design_Contract.md#12-verification-status-and-obligations). Current regressions cover ordinary state progression, fail-closed trap retention, and delayed memory completion. Assertions for valid-before-use, commit exclusivity, and retained-basis stability remain open.
 
 ## Metadata
 
-- Document type: Core state contract
-- RTL authority: future integrated `rtl/core/rv32_core.sv`
-- Verification authority: future Core state-machine, stability, commit, and trap-integration tests
+- Document type: implemented Core state contract
+- RTL authority: `rtl/core/rv32_core.sv`
+- Verification authority: Core integration, fail-closed, and backpressure suites listed by the Core design contract, plus future assertions

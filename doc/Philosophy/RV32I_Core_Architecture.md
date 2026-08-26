@@ -4,11 +4,15 @@
 
 **Execution environment:** [RV32I Execution-Environment Contract](RV32I_Execution_Environment_Contract.md)
 
-**Module contracts:** [Instruction Decoder](../Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md), [Trap Controller](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md), [ALU](../Implementation/Execution/RV32I_ALU_Design_Contract.md), [CTRL](../Implementation/Execution/RV32I_CTRL_Design_Contract.md), [LSU](../Implementation/Execution/RV32I_LSU_Contract.md), [CSR/SYSTEM Controller](../Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md), [Register File](../Implementation/State/RV32I_Register_File_Design_Contract.md), [Core-Owned State](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md), [CSR Register Bank](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md), and [Memory Subsystem](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
+**Software contract:** [RV32I Software Authoring Contract](RV32I_Software_Authoring_Contract.md)
 
-**Implementation plan:** [RV32I Core Implementation](../Roadmap/RV32I_Core_Implementation.md)
+**Core contract:** [RV32I Core Design Contract](../Implementation/RV32I_Core_Design_Contract.md)
 
 **Architecture roadmap:** [Exceptions, Traps, and Extensions](../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+
+**Platform roadmap:** [RV32I SoC and Platform Roadmap](../Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
+
+**RTL naming:** [RV32I RTL Naming Contract](RV32I_RTL_Naming_Contract.md)
 
 ## 1. Purpose
 
@@ -30,53 +34,96 @@ The core shall use one synchronous clock for persistent state. Completion, error
 
 ## 3. System Structure
 
-```text
-                                 core
-        +-------------------------------------------------------+
-        | PC / IR / instruction FSM                             |
-        |      |                         |                       |
-        |      v                         v                       |
-        | LSU fetch path              decoder                   |
-        |      |                    semantics + trap             |
-        |      |                         |                       |
-        |      |                    register file                |
-        |      |                  /    |    |     \               |
-        |      |                ALU  CTRL  LSU  CSR/SYSTEM       |
-        |      |                  \    |    |     /               |
-        |      |                   pending results ----> COMMIT  |
-        |      |                         |                       |
-        |      |               CSR transaction select           |
-        |      |                         |                       |
-        |      |                    CSR register bank            |
-        |      +---- trap candidates --> qualification           |
-        |                                    |                   |
-        |                                rv32_trap ----> TRAP    |
-        +----------+----------------------+----------------------+
-                   |                      |
-           logical IMEM path      logical DMEM path
-                   |                      |
-                   +---- profile-defined adapter/mapping ----+
-                                      |
-                         one or more physical backends
+```mermaid
+flowchart TB
+    subgraph CORE["Core architectural boundary"]
+        direction TB
+
+        LIFE["PC, active instruction,<br/>and lifecycle control"]
+        FETCH["Fetch path"]
+        DEC["Instruction decoder"]
+        RF["Register file"]
+
+        subgraph EXEC["Execution candidates"]
+            direction LR
+            ALU["ALU"]
+            CTRL["CTRL"]
+            LSU["LSU"]
+            CSR["CSR / SYSTEM"]
+        end
+
+        NORMAL["Pending normal result"]
+        QUAL["Trap qualification<br/>and arbitration"]
+        TRAPCTL["Trap-entry controller"]
+        CSRSEL["CSR transaction selection"]
+        CSRBANK["CSR register bank"]
+        COMMIT["Normal commit"]
+        TRAPCOMMIT["Trap commit"]
+
+        LIFE --> FETCH
+        LIFE --> DEC
+        DEC --> RF
+        DEC --> ALU
+        DEC --> CTRL
+        DEC --> LSU
+        DEC --> CSR
+        RF --> ALU
+        RF --> CTRL
+        RF --> LSU
+        RF --> CSR
+
+        ALU --> NORMAL
+        CTRL --> NORMAL
+        LSU --> NORMAL
+        CSR --> NORMAL
+        NORMAL --> COMMIT
+
+        FETCH --> QUAL
+        DEC --> QUAL
+        CTRL --> QUAL
+        LSU --> QUAL
+        CSR --> QUAL
+        QUAL --> TRAPCTL
+        TRAPCTL --> TRAPCOMMIT
+
+        CSR -->|ordinary candidate| CSRSEL
+        TRAPCTL -->|trap candidate| CSRSEL
+        COMMIT -->|normal authorization| CSRSEL
+        TRAPCOMMIT -->|trap authorization| CSRSEL
+        CSRSEL --> CSRBANK
+        CSRBANK -. read response .-> CSR
+        CSRBANK -. read response .-> TRAPCTL
+    end
+
+    IMEM["Logical IMEM path"]
+    DMEM["Logical DMEM path"]
+    MAP["SoC/platform adapter and unified map"]
+    BACKEND["One or more physical backends"]
+
+    FETCH --> IMEM
+    LSU --> DMEM
+    IMEM --> MAP
+    DMEM --> MAP
+    MAP --> BACKEND
 ```
 
-Instruction fetch and data access remain logically separate Harvard paths at the Core boundary. The implemented LSU hosts the fetch path as a pass-through and the data path as an ISA-semantic translator. Each transaction crosses a profile-defined adapter layer before reaching a backend. A profile may map both paths onto one shared physical memory or preserve separate instruction and data backends; physical topology is not a Core invariant.
+Instruction fetch and data access use one 32-bit architectural address space. They remain separate logical IMEM and DMEM paths only at the Core microarchitectural boundary. The LSU boundary owns fetch pass-through and ISA-level data semantics; SoC/platform adapters own the unified map, permissions, routing, and physical topology. Both paths may terminate in one shared physical RAM or in different backends without creating separate software-visible address spaces.
 
 ## 4. Responsibility Boundaries
 
 | Component | Architectural responsibility |
 | --- | --- |
 | Core | Instruction lifetime, PC and IR ownership, register-file access, execution scheduling, pending results, memory-request lifetime, trap-source qualification and arbitration, and architectural commit or trap entry |
-| Core-owned state | Retained instruction identity, operands, pending normal effects, memory-request fields, selected trap report, and FSM state |
-| Instruction decoder | Translation from instruction bits to semantic fields and reporting of illegal or unsupported encodings |
-| Register file | Architectural GPR storage and preservation of `x0` |
-| ALU | Combinational integer operation on supplied values |
-| CTRL | Combinational branch/jump evaluation, complete control-transfer next PC, jump link value, and applicable target-alignment traps |
-| LSU | Stateless fetch pass-through, data effective address, alignment, width, lane, extension semantics, memory-fault traps, and defensive invalid-uop traps |
-| CSR/SYSTEM controller | Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal bank responses into trap candidates, and controller-generated CSR transactions |
-| Trap controller | Combinational construction and legality qualification of machine trap-entry CSR and Direct-mode PC candidates from a retained report |
-| CSR register bank | Dense physical CSR cells, architectural address dispatch, per-CSR field and reset semantics, parameterized read/write plumbing, atomic validation, and synchronous transaction commit |
-| Memory adapters | Address-map validation, local-address translation, backend timing, routing, and backend error adaptation |
+| [Core-owned state](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md) | Implementation-defined instruction-lifetime state that preserves the abstract stability and commit invariants |
+| [Instruction decoder](../Implementation/Controller/RV32I_Instruction_Decoder_Design_Contract.md) | Translation from instruction bits to semantic fields and reporting of illegal or unsupported encodings |
+| [Register file](../Implementation/State/RV32I_Register_File_Design_Contract.md) | Architectural GPR storage and preservation of `x0` |
+| [ALU](../Implementation/Execution/RV32I_ALU_Design_Contract.md) | Integer operation on supplied values |
+| [CTRL](../Implementation/Execution/RV32I_CTRL_Design_Contract.md) | Branch/jump evaluation, complete control-transfer next PC, jump link value, and applicable target-alignment traps |
+| [LSU](../Implementation/Execution/RV32I_LSU_Contract.md) | Fetch pass-through, data effective address, alignment, width, lane, extension semantics, memory-fault traps, and defensive invalid-uop traps |
+| [CSR/SYSTEM controller](../Implementation/Execution/RV32I_CSR_SYSTEM_Design_Contract.md) | Zicsr instruction semantics, exact SYSTEM interpretation, conversion of illegal bank responses into trap candidates, and controller-generated CSR transactions |
+| [Trap controller](../Implementation/Controller/RV32I_Trap_Controller_Design_Contract.md) | Construction and legality qualification of machine trap-entry CSR and Direct-mode PC candidates from a retained report |
+| [CSR register bank](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md) | Architectural CSR views, address dispatch, field/reset semantics, transaction validation, and atomic state commitment |
+| [Memory adapters](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md) | Unified-map validation, local-address translation, backend timing, routing, and external error reporting |
 
 Execution units shall not access the register file, select destination registers, or commit architectural state. The core shall not repeat raw instruction decoding or embed the physical memory map.
 
@@ -86,41 +133,55 @@ Trap detection is decentralized: each unit shall report only conditions within i
 
 Architectural state consists of the PC, general-purpose registers, machine trap state required by the supported environment, and committed memory-visible effects. The implementation may retain nonarchitectural state including the current instruction, pending register result, pending next PC, pending trap report, and FSM state.
 
-The PC and current instruction shall identify the same instruction throughout its execution lifetime. They shall remain stable from successful fetch completion until that instruction reaches the commit boundary or an exception path supersedes normal completion.
+The PC and current instruction shall identify the same instruction throughout its execution lifetime. They shall remain stable from successful fetch completion until that instruction reaches the commit boundary or an exception path supersedes normal completion. Decoded semantics, operands, and memory-request fields need not be duplicated into Core registers when they remain deterministic functions of invariant retained state.
 
 Execution shall first produce either pending normal values or a trap candidate. Normal PC, GPR, and instruction-directed CSR updates shall occur only at `COMMIT`. A qualified exception shall instead update trap state and trap PC through `TRAP`, with no normal completion from the faulting instruction. A completed store may already be memory-visible before the subsequent PC/GPR commit; `COMMIT` is therefore not a rollback mechanism for accepted stores.
 
 ## 6. Abstract Instruction Lifecycle
 
-```text
-FETCH --successful fetch------------> EXECUTE
-EXECUTE --normal non-memory---------> COMMIT
-EXECUTE --memory--------------------> LSU_WAIT
-LSU_WAIT --successful completion----> COMMIT
-FETCH | EXECUTE | LSU_WAIT --trap---> TRAP
-COMMIT | TRAP ----------------------> FETCH
+```mermaid
+stateDiagram-v2
+    [*] --> FETCH: reset
+
+    FETCH --> FETCH: wait
+    FETCH --> EXECUTE: fetch success
+
+    EXECUTE --> COMMIT: normal
+    EXECUTE --> IO_WAIT: memory operation
+
+    IO_WAIT --> IO_WAIT: wait
+    IO_WAIT --> COMMIT: success
+
+    FETCH --> TRAP: synchronous trap
+    EXECUTE --> TRAP: synchronous trap
+    IO_WAIT --> TRAP: synchronous trap
+
+    COMMIT --> FETCH: commit
+
+    TRAP --> TRAP: trap entry not valid
+    TRAP --> FETCH: successful trap entry
 ```
 
 - **FETCH** owns one instruction transaction and considers only the fetch-path trap candidate.
 - **EXECUTE** gives the decoder trap precedence, then considers only the specialist unit selected by the decoded execution class.
-- **LSU_WAIT** owns one data transaction and considers only the data-side LSU trap candidate.
+- **IO_WAIT** owns one data transaction and considers only the data-side LSU trap candidate.
 - **COMMIT** applies pending normal PC, GPR, and CSR effects and accepts no synchronous trap from the completing instruction.
 - **TRAP** applies the selected architectural trap state and starts the next fetch at the trap vector.
 
-These names define the abstract model. Concrete state representation and signal assignments belong to the core implementation document and RTL.
+These unprefixed names define the abstract model. Their concrete RTL mappings and signal assignments belong to the Core design contract and RTL.
 
 ## 7. Data and Control Flow
 
-The decoder shall emit register references, dependencies, a normalized immediate, typed execution operations, an execution/result class, write authorization, and an encoding-trap candidate. The core shall ignore semantic outputs when the decoder trap is valid; otherwise it shall read the register file and route 32-bit values to the selected unit.
+The decoder shall emit typed instruction meaning and an encoding-trap candidate. Core shall resolve architectural register references into values and schedule the selected specialist boundary. A decoder trap shall suppress architectural acceptance of every normal or specialist candidate, although combinational evaluation need not be physically gated.
 
-For control-transfer instructions, CTRL shall return the complete next PC, including conditional-branch fall-through. For ordinary instructions, the core shall produce sequential progression by four bytes. Jump targets and link values remain separate results.
+Execution specialists shall own the semantic transformations assigned in Section 4 and shall return candidates rather than committing state. Core shall select the applicable normal result or trap report and authorize exactly one architectural exit path. Concrete operand, result, and PC selection belong to the [Core design contract](../Implementation/RV32I_Core_Design_Contract.md#6-datapath-and-result-selection).
 
-The LSU shall receive base and store-source values directly and shall calculate data effective addresses locally. All memory paths shall carry full architectural byte addresses to adapters and shall tolerate arbitrary adapter latency under the generic transaction contract. Specialist result and trap outputs are mutually exclusive candidates; the core determines the architectural exit path.
-
-All CSR mutations shall use one shared atomic register-bank transaction interface. Parent integration shall select among controller-generated Zicsr or MRET candidates, Core-generated trap entry, timer, and future extension transactions. The CSR/SYSTEM instruction controller is not a transit point for Core trap, timer, or future-extension updates.
+Memory paths shall carry full architectural byte addresses to SoC/platform adapters and shall tolerate arbitrary adapter latency under the transaction contract. CSR producers shall share one atomic register-bank boundary; Core shall select and authorize one transaction source without requiring every producer to pass through the CSR/SYSTEM instruction controller.
 
 ## 8. Scope and Evolution
 
-The machine timer interrupt is the only interrupt source in the current planned scope, but its source interface, synchronization, sampling, and arbitration require a later implementation stage. Other interrupt sources, lower privilege modes, debug, additional ISA extensions, caches, pipelining, speculation, and increased memory concurrency require separate architecture work. Adding one of these features requires revision here only when it changes a responsibility boundary or abstract system invariant.
+The machine timer interrupt is the only interrupt source in the planned baseline. Its integration milestone shall add Vectored-mode trap support together with the SoC timer source, synchronization, sampling, and arbitration. Other interrupt families may be considered only after that milestone and concrete SoC hardware requirements exist.
 
-Changes limited to ports, state encoding, mux structure, cycle optimization, memory-map parameters, or implementation naming belong to RTL, module contracts, or the core implementation document.
+Caches, store buffers, pipelining, speculation, out-of-order memory execution, parallel Core transactions, multiple harts, coherent/cache-visible independent masters, lower privilege modes, PMP, MMU, and virtual memory are explicit baseline non-goals. Additional ISA extensions require separate architecture work when they change a responsibility boundary or abstract invariant.
+
+Changes limited to ports, state encoding, mux structure, or cycle optimization belong to RTL, module contracts, or the [Core design contract](../Implementation/RV32I_Core_Design_Contract.md). Physical maps and device parameters belong to the [SoC/platform roadmap](../Roadmap/RV32I_SoC_and_Platform_Roadmap.md). Identifier form and naming migrations are governed by the [RTL naming contract](RV32I_RTL_Naming_Contract.md).

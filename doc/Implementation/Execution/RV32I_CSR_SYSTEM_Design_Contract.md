@@ -8,11 +8,11 @@
 
 **CSR register bank:** [RV32I CSR Register Bank Design Contract](../State/RV32I_CSR_Register_Bank_Design_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 ## 1. Purpose
 
-This document defines the semantic boundary of the combinational `rv32_csr` controller. Package definitions and module RTL are authoritative for encoded fields and exact port spelling. The register-bank contract is authoritative for storage topology, address dispatch, per-CSR semantics, reset, and atomic commitment.
+This document defines the semantic boundary of the combinational `rv32_csr_controller` controller. Package definitions and module RTL are authoritative for encoded fields and exact port spelling. The register-bank contract is authoritative for storage topology, address dispatch, per-CSR semantics, reset, and atomic commitment.
 
 The controller implements instruction behavior and interprets bank legality responses. It does not own CSR storage, commit architectural state, arbitrate traps, or perform trap entry.
 
@@ -46,13 +46,13 @@ The candidate write uses the shared bank lane type:
 
 ```systemverilog
 typedef struct packed {
-    logic        en;
-    logic [11:0] addr;
-    logic [31:0] wdata;
+    logic        write_enable;
+    logic [11:0] address;
+    logic [31:0] write_data;
 } csr_write_t;
 ```
 
-The package spelling `wdata` is authoritative for the candidate write-data field. An ordinary Zicsr or MRET status update is the one-enabled-lane case of the shared bank transaction interface; there is no dedicated controller-only write path.
+The package spellings are authoritative. An ordinary Zicsr or MRET status update is the one-enabled-lane case of the shared bank transaction interface; there is no dedicated controller-only write path.
 
 The candidate is resolved by the bank's per-CSR semantics and returned to the controller as `csr_wr_legal_i`. This legality feedback qualifies the instruction result but does not commit the candidate. Parent Core logic alone authorizes the bank's global write enable at the architectural commit point.
 
@@ -99,11 +99,11 @@ For `csr_op_i == CSR_SYS`, the controller shall interpret `csr_imm_i` exactly as
 
 | `csr_imm_i` | Outcome |
 | --- | --- |
-| `12'h000` with `rs1 == x0` and `rd == x0` | `exception(EXC_ECALL_M, 0)` |
-| `12'h001` with `rs1 == x0` and `rd == x0` | `exception(EXC_BREAKPOINT, 0)` |
+| `12'h000` with `rs1 == x0` and `rd == x0` | `make_exception(EXC_ECALL_M, 0)` |
+| `12'h001` with `rs1 == x0` and `rd == x0` | `make_exception(EXC_BREAKPOINT, 0)` |
 | `12'h105` with `rs1 == x0` and `rd == x0` | WFI no-op |
 | `12'h302` with `rs1 == x0` and `rd == x0` | MRET execution |
-| Other | `exception(EXC_ILLEGAL_INST, 0)` |
+| Other | `make_exception(EXC_ILLEGAL_INST, 0)` |
 
 Any nonzero `rs1` or `rd` for these exact SYSTEM operations is illegal. WFI shall produce no CSR read, candidate write, trap, or PC redirect; Core consequently selects sequential `pc + 4`. The instruction decoder owns structural `CSR_SYS` dispatch and shall not duplicate this exact-encoding policy.
 
@@ -133,17 +133,17 @@ MRET succeeds only when both required reads and the candidate `mstatus` write ar
 - the `mstatus` candidate shall remain enabled for Core commitment; and
 - the trap report shall be clear.
 
-If either read is illegal, the controller shall suppress the write candidate, clear `pc_valid_o`, and report `exception(EXC_ILLEGAL_INST, 0)`. If the `mstatus` write is illegal, the controller shall clear `pc_valid_o` and report the same exception; Core shall not commit the candidate.
+If either read is illegal, the controller shall suppress the write candidate, clear `pc_valid_o`, and report `make_exception(EXC_ILLEGAL_INST, 0)`. If the `mstatus` write is illegal, the controller shall clear `pc_valid_o` and report the same exception; Core shall not commit the candidate.
 
 ## 7. Trap Detection and Ownership
 
-The controller shall use the common `exception(code, tval)` helper for ECALL, EBREAK, unsupported SYSTEM operations, unsupported CSR operations, illegal required reads, illegal candidate writes, and defensive MRET access failures.
+The controller shall use the common `make_exception(code, tval)` helper for ECALL, EBREAK, unsupported SYSTEM operations, unsupported CSR operations, illegal required reads, illegal candidate writes, and defensive MRET access failures.
 
 Every controller-generated report is synchronous:
 
 ```text
-trap_o.valid     = 1
-trap_o.interrupt = 0
+trap_o.is_valid     = 1
+trap_o.is_interrupt = 0
 ```
 
 The current controller reports zero `tval` for all of these conditions. It uses `EXC_ECALL_M` for ECALL, `EXC_BREAKPOINT` for EBREAK, and `EXC_ILLEGAL_INST` for all CSR/SYSTEM legality failures.
@@ -154,7 +154,7 @@ The controller detects and reports these conditions. Core qualifies the active r
 
 Core shall consider the controller outputs only for a selected CSR/SYSTEM execution class in `EXECUTE`, after confirming that the decoder trap candidate is clear.
 
-Successful Zicsr and MRET candidates may be retained for `COMMIT`. A valid controller trap shall instead select `TRAP` and shall prevent commitment of:
+Successful Zicsr and MRET candidates may proceed to `COMMIT` while remaining deterministic functions of invariant instruction state. A valid controller trap shall instead select `TRAP` and shall prevent commitment of:
 
 - the candidate GPR result;
 - the normal PC result; and
@@ -166,7 +166,7 @@ All CSR mutation still occurs in the CSR register bank. Parent integration selec
 
 ## 9. Validation Status
 
-The dedicated controller regression at `testbench/cocotb/test-rv32_csr.py` passes **6/6** tests. Its combined cases cover:
+The dedicated controller regression at `testbench/cocotb/test-rv32_csr_controller.py` passes **6/6** tests. Its combined cases cover:
 
 - all six Zicsr computations;
 - `rd == x0` read suppression for `CSR_RW` and `CSR_RWI`;
@@ -184,7 +184,7 @@ These passing regressions satisfy the controller completion criterion. The CSR c
 
 ## 10. Design Invariants
 
-1. `rv32_csr` is purely combinational and owns no CSR storage.
+1. `rv32_csr_controller` is purely combinational and owns no CSR storage.
 2. The controller uses two bank read ports and produces at most one candidate write lane.
 3. Suppressed Zicsr reads and writes do not create legality failures.
 4. A failed required read suppresses any dependent candidate write.
@@ -197,7 +197,7 @@ These passing regressions satisfy the controller completion criterion. The CSR c
 ## Related Documents
 
 - [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
-- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [Core design contract](../RV32I_Core_Design_Contract.md)
 - [CSR register-bank contract](../State/RV32I_CSR_Register_Bank_Design_Contract.md)
 - [Instruction decoder contract](../Controller/RV32I_Instruction_Decoder_Design_Contract.md)
 - [Trap controller contract](../Controller/RV32I_Trap_Controller_Design_Contract.md)
@@ -207,5 +207,5 @@ These passing regressions satisfy the controller completion criterion. The CSR c
 
 - Document type: module contract
 - Authority: Zicsr and SYSTEM instruction semantics, CSR-access trap conversion, MRET result generation, and controller-generated bank transactions
-- RTL authority: `rtl/core/exec/rv32_csr.sv`, `rtl/core/type/rv32_inst_pkg.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_trap_pkg.sv`
-- Verification authority: `testbench/cocotb/test-rv32_csr.py`, `testbench/cocotb/test-rv32_csr_csrreg_tb.py`, and later Core integration tests
+- RTL authority: `rtl/core/exec/rv32_csr_controller.sv`, `rtl/core/type/rv32_inst_pkg.sv`, `rtl/core/type/rv32_csr_pkg.sv`, and `rtl/core/type/rv32_trap_pkg.sv`
+- Verification authority: `testbench/cocotb/test-rv32_csr_controller.py`, `testbench/cocotb/test-rv32_csr_csrreg_tb.py`, and the passing directed Core regressions

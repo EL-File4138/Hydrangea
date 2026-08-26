@@ -1,296 +1,246 @@
 # RV32I Execution-Environment Contract
 
-**Scope:** Reset, boot, memory mapping, software startup, fault policy, ordering, and platform-profile completeness
+**Scope:** Core reset, architectural address model, memory transaction/fault boundary, startup handoff, and authority separation
 
-**Status:** Frozen mechanism and profile-compliance rules; numerical deployment values are profile-resolved
+**Status:** Frozen cross-boundary mechanisms; SoC/platform hardware and deployment-image values close under their own authorities
 
 **Governing architecture:** [RV32I Core Architecture](RV32I_Core_Architecture.md)
 
+**Software contract:** [RV32I Software Authoring Contract](RV32I_Software_Authoring_Contract.md)
+
+**Platform roadmap:** [RV32I SoC and Platform Roadmap](../Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
+
 **Memory boundary:** [RV32I Memory Subsystem Design Contract](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
 
-**Roadmap:** [RV32I Exceptions, Traps, and Extensions Roadmap](../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
+## 1. Purpose and Authority Classes
 
-**Deferred decisions:** [RV32I Execution-Environment Deferred Decisions Register](RV32I_Execution_Environment_Deferred_Decisions.md)
+This contract freezes the mechanisms that Core, SoC/platform hardware, and a deployment-programmed image shall share. It does not assign one simulator's addresses or one linker's section layout to every deployment.
 
-**Normative clarification:** [RV32I Execution-Environment Configuration/Profile Amendment](../RV32I_Execution_Environment_Profile_Amendment.md)
+Decisions belong to four authority classes:
 
-## 1. Purpose and Decision Classes
+1. **Core/environment mechanism** is invariant across the supported deployment class;
+2. **SoC/platform-resolved hardware** defines reset integration, the physical map, permissions, devices, and error behavior;
+3. **deployment-programmed image** defines section layout, runtime reservations, startup state, trap installation, and application handoff; and
+4. **implementation-local choice** may vary while remaining invisible across the relevant boundary.
 
-This contract freezes the execution-environment mechanisms needed to integrate Core and link software without promoting one simulator memory configuration into a universal architectural constant.
-
-Execution-environment decisions belong to three classes:
-
-1. **frozen mechanism** defines behavior that every current profile shall preserve;
-2. **profile-resolved value** is software-visible and shall be fixed coherently for each concrete build or deployment; and
-3. **implementation-local choice** may vary without becoming a software dependency.
-
-Stage 1 of the exceptions roadmap is complete because these boundaries and the profile-completion rule are frozen. Before software is linked, the selected build profile shall resolve every linker-visible value required by Section 3. Different coherent profiles may select different numerical maps without reopening Core architecture.
+The [software contract](RV32I_Software_Authoring_Contract.md) owns image-programmed values. The [SoC and platform roadmap](../Roadmap/RV32I_SoC_and_Platform_Roadmap.md) owns undecided surrounding hardware. This contract owns only the rules that bind them to Core.
 
 The terms **shall**, **shall not**, **should**, and **may** denote a requirement, prohibition, recommendation, and permitted implementation choice, respectively.
 
-## 2. Frozen Architectural and Environment Mechanisms
-
-The following mechanisms are frozen across current profiles:
+## 2. Frozen Core and Environment Mechanisms
 
 | Property | Frozen mechanism |
 | --- | --- |
 | Hart count | One |
 | XLEN | 32 |
 | ISA exposed to software | RV32I plus Zicsr |
-| Initial/current privilege scope | Machine mode only |
+| Privilege scope | Machine mode only |
 | Endianness | Little-endian |
 | Software ABI | Freestanding RV32 ILP32 |
 | Instruction size/alignment | 32-bit instructions, `IALIGN=32` |
 | Execution model | In order, one instruction in flight |
-| Architectural addresses | Full 32-bit byte addresses |
-| Core memory boundary | Logical Harvard IMEM and DMEM request paths |
-| Transaction concurrency | At most one transaction per interface; the baseline Core contract does not overlap IMEM and DMEM requests |
-| Mapping ownership | Platform adapters own range checking, mapping/rebasing, routing, backend timing, and backend error reporting |
+| Architectural address model | One unified 32-bit byte-address space used by instruction fetches and data accesses |
+| Core memory boundary | Separate logical IMEM and DMEM requester interfaces |
+| Harvard status | Logical interface separation is microarchitectural, not two software-visible address spaces |
+| Transaction concurrency | At most one transaction per interface; baseline Core does not overlap IMEM and DMEM transactions |
+| Mapping ownership | SoC/platform adapters own ranges, permissions, decoding, routing, local-address translation, and backend errors |
+| Fault boundary | External memory errors are converted by LSU/Core into architectural access-fault exceptions |
 
-Core and LSU shall remain memory-map agnostic. A physical deployment may use unified RAM, separate instruction and data memories, ROM plus RAM, BRAM plus external memory, or another adapter-backed topology without changing their architectural interfaces.
+Core and LSU shall issue ordinary full-width architectural addresses and remain unaware of RAM, ROM, MMIO, aliases, and physical topology. A platform may route both logical paths to one unified RAM or to different physical backends while preserving one coherent architectural map.
 
-Software shall be built for `rv32i_zicsr` and the ILP32 ABI unless the build system uses an equivalent toolchain spelling. Software shall not emit unsupported ISA extensions.
+Software shall be built for `rv32i_zicsr` and ILP32 unless the toolchain uses an equivalent spelling. It shall not emit unsupported extensions.
 
-## 3. Profile-Resolved Configuration
+## 3. Authority-Resolved Configuration
 
-### 3.1 Required values
+### 3.1 Core parameter and platform scope
 
-Every concrete simulation build or platform profile shall resolve the following from one coherent configuration source:
+| Item | Authority | Cross-boundary requirement |
+| --- | --- | --- |
+| `ResetVector` | SoC/platform configures the Core parameter | Four-byte aligned and fetchable when reset is released |
+| Physical RAM/ROM | SoC/platform | Published in the unified address map with permissions |
+| MMIO and peripherals | SoC/platform | Explicit decode, register behavior, widths, and errors |
+| Unmapped regions | SoC/platform | Complete with external error; never silent success |
+| Physical topology | SoC/platform | Invisible to Core and compatible with the published map |
+| Platform discovery | SoC/platform through read-only `mconfigptr` | Versioned description when implemented; zero means unavailable |
+| Image sections and reservations | Deployment image | Fit and obey the selected platform map |
+| Startup and application entry | Deployment image | `_start` is reached by reset or documented handoff; application follows startup |
+| Stack, heap, and trap handler | Deployment image | Established without overlap and within permitted memory |
+| Image transport | Platform plus deployment image | Preserve load addresses and establish instruction visibility |
 
-| Profile item | Required resolution |
-| --- | --- |
-| Reset | Aligned `ResetVector`, reset/boot ownership, and fetchable reset target |
-| IMEM | Base, size, executable/read permissions, and routing |
-| DMEM | Base, size, read/write permissions, and routing |
-| Physical topology | Unified or separate backends, ROM/RAM composition, and any aliases |
-| Application/startup entry | Exact entry address and its relationship to reset or bootloader handoff |
-| Stack | Writable region, top, reserved depth, and non-overlap rule |
-| Image placement | Link and load addresses for every allocated section |
-| MMIO | Every range, device ABI, and supported access width, or an explicit statement that none exists |
-| Required devices | Host communication, timer, and interrupt facilities, or explicit absence |
+`ResetVector = 0x0000_0000` is a usable default profile value. It is not a portable Core invariant and software cannot change it at runtime.
 
-The RTL adapter parameters, linker script, startup definitions, image loader or boot path, and platform headers shall agree with the selected values. A build is non-compliant when these artifacts disagree even if each artifact is individually valid.
+The execution-environment contract does not require universal numerical values for instruction/data sections, stack, heap, `mtvec`, trap handlers, or application entry. Those values are deployment-programmed under the software contract and constrained by the selected SoC/platform.
 
-Generated linker fragments, generated symbols, or deliberately synchronized per-profile files should be preferred over duplicated handwritten constants.
+### 3.2 Deployment binding and image scope
 
-### 3.2 Current default direct-preload simulation values
+The deployment image owns `_start`, section layout, stack and optional heap reservations, initial `sp` and `gp`, data/BSS initialization, `__mtvec_base`, initial `mtvec`, and application handoff. The complete authority matrix is in [Section 3 of the software contract](RV32I_Software_Authoring_Contract.md#3-authority-matrix).
 
-For near-term bring-up, current shared synchronous-RAM adapter defaults and the direct-entry convention provide this convenient example configuration:
-
-```text
-ResetVector              = 0x0000_0000
-UnifiedRamBaseAddr       = 0x0000_0000
-UnifiedRamSizeBytes      = 0x0004_0000
-ImemBaseAddr             = 0x0000_0000
-ImemSizeBytes            = 0x0004_0000
-DmemBaseAddr             = 0x0000_0000
-DmemSizeBytes            = 0x0004_0000
-application entry        = ResetVector
-boot                     = direct preload
-MMIO                     = absent
-timer/interrupt devices  = absent
-```
-
-With these defaults, IMEM and DMEM expose the same physical 256 KiB RAM at `0x0000_0000`–`0x0003_FFFF`. This is evidence of the current adapter configuration, not a Core/LSU invariant or a permanent baseline address map.
-
-The active linker profile shall derive stack placement from configured writable memory and reserved regions. Its stack top equals `0x0004_0000` only when the selected writable region and reservations make that value valid; it is not frozen by this contract.
-
-A smaller simulation memory, larger FPGA BRAM, separate memories, a boot ROM, or external memory may replace these defaults when the complete RTL/software profile changes coherently.
+A linker or startup shim may consume generated platform values or discover bounds through `mconfigptr`. It shall not redefine the physical map. Dynamic stack or heap sizing is permitted only within platform-published regions reserved against collision.
 
 ## 4. Reset Contract
 
-On hart reset release, hardware shall guarantee:
+The SoC shall configure `ResetVector[1:0] == 2'b00`. On reset release, hardware shall guarantee:
 
 | State | Reset-visible guarantee |
 | --- | --- |
 | Privilege | Machine mode |
 | PC | Configured `ResetVector` |
-| `ResetVector` alignment | `ResetVector[1:0] == 2'b00` |
-| Reset target | Fetchable under the active profile |
+| Reset target | Fetchable in the SoC/platform map |
 | `x0` | Zero |
-| `x1`–`x31` | No software-visible value is guaranteed |
+| `x1`–`x31` | No software-visible value guaranteed |
 | Machine CSRs | Values defined by the [CSR register-bank contract](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md) |
 | Pending Core intent | No pending GPR, CSR, memory, or trap commit |
 
-The integrated Core shall initialize the PC from the active profile's `ResetVector` and should retain it as a configuration parameter. A direct-entry profile normally sets the linked startup entry equal to `ResetVector`. A bootloader profile may reset into boot code and transfer control to a distinct application entry.
+The SoC shall preserve the active-low Core-facing `rst_ni` convention, place Core and adapters in their specified reset states, and release execution only after the configured reset target is visible. Exact board wiring, clock/reset sources, synchronization, and sequencing belong to the SoC/platform contract.
 
-Reset does not establish a C runtime, stack pointer, global pointer, trap handler, argument vector, or process environment.
+Reset does not establish a stack, global pointer, C runtime, trap handler, arguments, or process environment. The startup shim owns those operations.
 
-## 5. Image and Link Contract
+## 5. Unified Address, Access, and Fault Contract
 
-The active profile shall generate or supply linker regions corresponding to its configured executable and writable ranges. The following block is only an example for the current default shared-RAM configuration:
+Instruction fetches and data operations use one architectural address space. Separate IMEM and DMEM interfaces identify transaction role and permit different routing or permissions; they do not grant software separate pointer domains.
 
-```text
-MEMORY
-{
-    RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 0x00040000
-}
-```
+The SoC/platform shall publish every RAM, ROM, MMIO, alias, reserved, and unmapped range and the applicable instruction/read/write permissions. An adapter shall return `ready && err` for any unmapped, permission-invalid, unsupported-width, malformed, or backend-failed transaction.
 
-It shall not be copied into another profile unless that profile deliberately selects the same values.
+LSU/Core shall convert that error according to the transaction role:
 
-The profile-independent link/startup requirements are:
-
-| Item | Requirement |
-| --- | --- |
-| Entry symbol | Conventionally `_start`; another explicit symbol may be selected by the profile |
-| Entry address | Equals the direct reset target or the address receiving bootloader handoff |
-| Text and read-only data | Placed in profile-declared executable/readable memory |
-| Writable data and bss | Placed in profile-declared writable memory |
-| Stack | Writable, non-overlapping, and reserved by the linker/profile |
-| Stack alignment | `sp` is 16-byte aligned at standard ABI procedure entry |
-| Heap | Optional; shall not collide with image, stack, or reserved regions |
-| Trap vector | Image/platform-defined, four-byte aligned, and in configured executable memory |
-| Load/run addresses | Equal unless the profile defines and implements relocation or copying |
-
-The linker shall reject an image that exceeds any selected region or overlaps reserved runtime storage. A flat image, ELF file, hex file, or another lossless container may be used, but load addresses shall match the active profile.
-
-## 6. Startup and ABI Contract
-
-Before entering ordinary C code, startup software shall establish, as applicable:
-
-1. a valid `sp` with 16-byte alignment at the ABI procedure entry;
-2. `gp` when required by the selected code model and linker relaxation;
-3. `.data` in its linked initial state;
-4. a zeroed `.bss`;
-5. any platform state required by the active profile;
-6. an aligned `mtvec` before software depends on trap recovery;
-7. any software trap-frame state; and
-8. entry to `main` according to the standard RV32 ILP32 calling convention.
-
-Hardware does not initialize the C runtime. No `argc`, `argv`, environment block, C library initialization, or operating-system service is implied. If `main` returns, startup software shall enter a defined local terminal loop unless the active profile defines another termination service.
-
-ECALL remains an architectural Machine-mode exception. It is not a process-exit or semihosting convention unless a profile explicitly defines such an ABI.
-
-## 7. Boot and Instruction Visibility
-
-Direct preloading is the preferred first simulation mechanism:
-
-```text
-simulation harness loads image according to linked load addresses
-    -> platform establishes instruction visibility
-    -> hart reset is released
-    -> PC = configured ResetVector
-```
-
-For a direct-entry image, the linker entry and `ResetVector` shall agree. The harness and memory backend shall ensure that the image is present after memory-reset effects and before the first fetch. ELF versus binary versus hex and the preload mechanism itself are implementation-local choices.
-
-A later bootloader profile may use different reset and application entries. Its loader shall establish instruction visibility before handoff and shall define any required relocation, validation, or copying.
-
-Runtime self-modifying code is unsupported. Software shall not rely on a DMEM write becoming executable instruction state. `FENCE.I` and Zifencei are not implemented. Physical use of unified writable memory does not imply runtime instruction/data coherence.
-
-## 8. Access, Fault, and Misalignment Policy
-
-The active profile shall publish every visible instruction, data, and MMIO range and its permissions. Unmapped, permission-invalid, malformed, and backend-failed transactions shall complete as errors and shall never silently return zero, coerce an access, or discard a store.
-
-| Condition | Architectural outcome | `tval` |
+| External failure | Architectural outcome | `tval` |
 | --- | --- | --- |
-| Instruction fetch outside configured executable IMEM or backend failure | Instruction access fault | Architectural fetch address |
-| Load outside configured readable DMEM/MMIO or backend failure | Load access fault | Effective address |
-| Store outside configured writable DMEM/MMIO or backend failure | Store/AMO access fault | Effective address |
-| Misaligned halfword load/store | Corresponding address-misaligned exception | Effective address |
-| Misaligned word load/store | Corresponding address-misaligned exception | Effective address |
-| Taken control target not four-byte aligned | Instruction-address-misaligned exception | Attempted target |
+| Instruction fetch | Instruction access fault | Architectural fetch address |
+| Load | Load access fault | Effective address |
+| Store | Store/AMO access fault | Effective address |
 
-Byte data accesses are naturally aligned. Halfword accesses require `address[0] == 0`; word accesses require `address[1:0] == 2'b00`. The LSU shall reject misaligned data operations locally without issuing DMEM requests. Misaligned-access emulation is not provided.
+The platform shall not silently return zero, coerce an unsupported access, or discard a failed store.
 
-Each MMIO device shall state its supported widths. Initial MMIO profiles should prefer aligned 32-bit word accesses. Unsupported widths or operations shall fault rather than be silently transformed.
+The LSU owns natural-alignment checks before DMEM issue. Byte accesses are naturally aligned; halfword accesses require `address[0] == 0`; word accesses require `address[1:0] == 2'b00`. Misaligned data operations trap locally and do not issue an external request. Taken control targets remain subject to `IALIGN=32` checks.
 
-## 9. Ordering and FENCE
+Specific MMIO design remains deferred to the SoC/platform roadmap. Each future device shall define supported widths and return an error for unsupported operations.
 
-The baseline Core contract specifies one hart, one instruction in flight, no speculation, no cache, no store buffer, no out-of-order execution, and no overlapping instruction/data request. A memory operation completes before its instruction can commit and before a later memory operation proceeds.
+## 6. Startup, ABI, and Application Handoff
 
-Under these constraints, base `FENCE` is a legal serialization no-op:
+The canonical deployment image is an ELF32 little-endian RISC-V executable. Binary and hexadecimal forms are transport derivatives. Detailed linker and startup requirements are normative in the [software authoring contract](RV32I_Software_Authoring_Contract.md).
+
+The startup shim runs before the application and, as selected by the image, establishes `gp`, `sp`, data relocation, BSS initialization, trap entry through `__mtvec_base`, optional heap bounds, and any platform binding. It then transfers control to an image-selected application entry using RV32 ILP32.
+
+The startup entry and application entry are distinct roles even when a minimal image places them together. A direct-reset deployment normally places `_start` at `ResetVector`; a bootloader or programming shim may hand control to `_start` at another platform-valid address.
+
+UART self-programming is assigned to the startup-shim architecture and depends on a SoC definition of UART MMIO, destination storage, image validation, and instruction-visibility behavior.
+
+No libc, heap, host-exit ABI, semihosting convention, or operating-system service is required. ECALL remains an architectural Machine-mode exception unless a future platform explicitly defines another software ABI.
+
+## 7. Platform Discovery Through `mconfigptr`
+
+Platform discovery shall use the read-only Machine-mode `mconfigptr` CSR as its root. A nonzero supported value points to a versioned platform-description structure containing the physical-memory and Core-aware MMIO information made discoverable to software. Software writes shall not populate or relocate this pointer.
+
+Zero denotes that no discoverable platform structure is provided. Software shall then use only a statically matched linker/header configuration.
+
+The SoC/platform roadmap owns the structure format, pointer value, storage, versioning, trust model, and agreement tests. Adding the structure requires coherent changes to SoC RTL, CSR behavior, generated software inputs, startup parsing, and documentation.
+
+## 8. Image Loading and Instruction Visibility
+
+A simulation deployment using direct ELF preload shall load each `PT_LOAD` segment at its linked load address before reset release. A harness that injects raw test words is a verification mechanism, not evidence of ELF-image loading.
+
+An FPGA first-deployment flow shall place the ELF-derived image into designed executable storage through the selected configuration/JTAG mechanism. BRAM initialization may be part of the FPGA configuration image; external DRAM requires a platform-defined initialization or loading path.
+
+A later bootloader transport belongs to the SoC/platform contract. It shall define image format, validation, placement, failure behavior, instruction visibility, and handoff.
+
+Physical writable/executable memory may permit bytes to be changed, but application runtime self-modifying code is out of scope. The baseline excludes Zifencei and `FENCE.I`, so software shall not rely on a DMEM write becoming executable instruction state. Platform-controlled loading before reset release or application handoff is allowed only when the platform establishes visibility without requiring unsupported instructions.
+
+## 9. Memory Ordering and FENCE
+
+The baseline Core has one hart, one instruction in flight, no cache, no store buffer, no speculation, no out-of-order execution, and no overlapping IMEM/DMEM request. A memory instruction completes before normal commit and before a later memory operation proceeds.
+
+Under these constraints, base FENCE is a legal serialization no-op:
 
 - no GPR write;
 - no CSR write;
 - no LSU request; and
 - sequential PC progression.
 
-Any cache, store buffer, independent DMA master, weaker device ordering, pipelining, speculation, or increased transaction concurrency shall trigger review of FENCE and instruction-visibility semantics.
+No cache, store buffer, speculative memory path, parallel Core transaction, multiple hart, coherent/cache-visible independent master, PMP, MMU, virtual memory, or lower privilege mode is in baseline scope. These are explicit non-goals rather than unassigned profile choices.
 
-## 10. First Pure-Core Simulation Milestone
+## 10. Minimal Platform Contract
 
-The first integrated pure-Core simulation requires only synchronous exceptions. It requires no UART, timer, MMIO device, host-communication ABI, interrupt source, or interrupt controller. The current default direct-preload profile declares all of those facilities absent.
+A minimal Core deployment requires only executable/readable/writable memory and synchronous exceptions. UART, MMIO devices, timers, interrupt sources, platform discovery, and a production host ABI may all be absent.
 
-When no timer is present, any exposed machine-timer pending view shall remain inactive. Machine Timer Interrupt remains the first planned interrupt source, but its timebase, MMIO representation, clock-domain behavior, synchronization, and sampling point remain future platform work.
+A testbench may observe completion out of band. A test-only `__test_done` symbol or halt loop may be standardized by a test package, but it shall not become a production platform ABI implicitly.
 
-A testbench may observe completion out of band, but a magic PC, signal, or timeout is not a software-visible ABI unless a later profile explicitly promotes it into one.
+The machine timer interrupt is the first planned asynchronous source. Its SoC device and Core integration are separate roadmap obligations. As a project milestone choice, Vectored-mode trap support shall be delivered with and treated as a prerequisite for claiming timer support; this is not an ISA requirement that timer interrupts use Vectored mode. The baseline trap contract remains Direct-mode only until that milestone closes.
 
-## 11. Profile Compliance and Closure
+## 11. Cross-Authority Closure
 
-Every concrete simulation or FPGA profile shall publish, in one coherent profile or generated configuration:
+A concrete deployment is closed only when all applicable authorities agree:
 
-1. exact reset and boot vectors;
-2. every instruction, data, ROM, RAM, and MMIO range with permissions;
-3. supported access widths and fault behavior for every MMIO device;
-4. linker regions, image entry, stack placement/reservation, and load/run addresses;
-5. image-loading and instruction-visibility guarantees;
-6. startup assumptions and any host-termination ABI;
-7. required UART or other host communication;
-8. timer source, frequency, counter/compare model, and pending generation if present; and
-9. all interrupt sources, synchronization, priority, and controller behavior.
+### 11.1 Core/environment closure
 
-An absent facility shall be stated as absent rather than left unspecified. A profile is closed for a particular build only when:
+- `ResetVector`, transaction protocol, address width, alignment, and fault conversion obey this contract; and
+- Core/module verification covers the selected behavior.
 
-1. the profile records every applicable concrete value;
-2. RTL parameters and adapters agree;
-3. linker scripts, startup code, and platform headers agree;
-4. the image loader or boot path agrees; and
-5. directed verification demonstrates the declared map, access, fault, reset, and handoff behavior.
+### 11.2 SoC/platform closure
 
-A different deployment may resolve different values without reopening Core architecture. Implementation-local choices and absent future facilities are classified in the [deferred decisions register](RV32I_Execution_Environment_Deferred_Decisions.md).
+- reset, clock, unified map, permissions, routing, devices, errors, and image visibility are published and verified; and
+- discovery data, when present, matches the implemented platform.
 
-## 12. Stage 1 Coverage
+### 11.3 Deployment-image closure
 
-This contract answers every Stage 1 roadmap question by freezing either a mechanism or a per-profile resolution obligation:
+- linker regions and symbols fit the selected platform;
+- startup establishes all state consumed by the application;
+- MMIO symbols match the platform; and
+- the canonical ELF and any transport derivatives preserve placement.
 
-| Stage 1 question | Frozen rule | Current default/example resolution |
-| --- | --- | --- |
-| Reset vector | Configured, four-byte aligned, and fetchable | `0x0000_0000` |
-| Instruction/data ranges | Profile publishes full ranges and permissions; adapters own mapping | Shared `0x0000_0000`–`0x0003_FFFF` views |
-| RAM/ROM/MMIO windows | Profile publishes topology and every visible range | 256 KiB shared RAM; no ROM or MMIO |
-| Unmapped behavior | Architectural access fault; never silent success | Same |
-| MMIO widths | Every device declares supported widths | No MMIO device |
-| Misaligned accesses | Trap locally; no hardware emulation | Same |
-| FENCE assumptions | Serialized Core; base FENCE is a legal no-op | Same |
-| Self-modifying code | Unsupported; no FENCE.I | Same |
-| Initial privilege | Machine mode | Same |
-| Startup ABI | Freestanding RV32 ILP32; entry and stack are profile-resolved | Direct entry at `ResetVector`; stack derived from writable-memory configuration |
-| Host/timer/interrupt devices | Profile declares presence or absence; none required for first pure-Core integration | Absent |
+### 11.4 Integration closure
 
-Stage 1 is complete because the execution-environment mechanism is frozen and every concrete build/profile shall resolve a complete, internally consistent memory/reset/link configuration before software is linked. The current direct-preload simulation may use the existing zero-based 256 KiB shared-RAM defaults, but those values are not Core architectural invariants.
+- the loader or boot path agrees with ELF load addresses;
+- executable bytes are visible before reset release or handoff;
+- unsupported accesses produce external errors and architectural faults; and
+- directed tests demonstrate reset, startup, memory, trap, and application handoff.
+
+The execution-environment contract itself no longer carries every deployment's numerical software layout or SoC map.
+
+## 12. Decision Disposition
+
+| Question | Disposition |
+| --- | --- |
+| Reset PC | Platform-configured Core parameter; zero is only a default example |
+| Instruction/data address spaces | One architectural address space; two logical Core interfaces |
+| RAM/ROM/MMIO ranges | SoC/platform contract and roadmap |
+| Unmapped/unsupported access | External error, converted to the applicable access fault |
+| Physical topology | SoC/platform; invisible to Core |
+| Platform discovery | Read-only root through `mconfigptr`; zero denotes unavailable |
+| Section and runtime layout | Deployment image under the software contract |
+| Stack/heap sizing | Linker/startup, optionally discovery-informed |
+| Trap entry symbol | `__mtvec_base`; baseline Direct mode, Vectored mode delivered with the first interrupt |
+| Image format | ELF32 little-endian canonical; binary/hex derivatives allowed |
+| UART programming | Startup-shim responsibility blocked on SoC UART/loader ABI |
+| Runtime self-modifying code | Out of scope until Zifencei is deliberately implemented |
+| Cache/speculation/concurrency/multihart/VM | Explicit baseline non-goals |
 
 ## 13. Change Control
 
-Changing a frozen mechanism requires an explicit revision to this contract. Changing a profile-resolved value requires a coherent profile/build update and verification, not a Core architecture revision.
-
-Architectural review is required before adding runtime self-modifying code, Zifencei, cache, memory protection, lower privilege modes, multiple harts, speculative or out-of-order memory execution, multiple outstanding transactions, DMA/coherent masters, or a general interrupt controller.
+Changing a frozen Core/environment mechanism requires revision here. Changing a platform map or device requires a SoC/platform contract update. Changing linker/runtime policy requires a software-contract update. All cross-boundary changes require renewed integration closure.
 
 The governing rule is:
 
 ```text
-Core architecture freezes mechanisms.
-Platform profiles freeze concrete software-visible values.
-Build tooling binds the two coherently.
-Backend implementation choices remain invisible unless promoted into a profile.
+Core freezes execution mechanisms and generic interfaces.
+SoC/platform freezes physical hardware and software-visible devices.
+The deployment image programs software layout and startup policy.
+Generated configuration and tests prove that the selected authorities agree.
 ```
 
 ## Related Documents
 
-- [Configuration/profile amendment](../RV32I_Execution_Environment_Profile_Amendment.md)
 - [Core architecture](RV32I_Core_Architecture.md)
-- [Execution-environment deferred decisions](RV32I_Execution_Environment_Deferred_Decisions.md)
-- [Core implementation](../Roadmap/RV32I_Core_Implementation.md)
+- [Software authoring contract](RV32I_Software_Authoring_Contract.md)
+- [SoC and platform roadmap](../Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
+- [Core design contract](../Implementation/RV32I_Core_Design_Contract.md)
 - [Exceptions, traps, and extensions roadmap](../Roadmap/RV32I_Exceptions_Traps_and_Extensions_Roadmap.md)
 - [Memory subsystem contract](../Implementation/IO/RV32I_Memory_Subsystem_Design_Contract.md)
 - [LSU contract](../Implementation/Execution/RV32I_LSU_Contract.md)
-- [Core-owned state contract](../Implementation/State/RV32I_Core_Owned_State_Design_Contract.md)
 - [CSR register-bank contract](../Implementation/State/RV32I_CSR_Register_Bank_Design_Contract.md)
 
 ## Metadata
 
-- Document type: execution-environment mechanism and profile-compliance contract
-- Authority: reset, mapping, boot, startup ABI, fault, ordering, profile-resolution, and build-closure rules
-- Current-default memory-map evidence: `rtl/mem/rv32_shared_sync_ram_adapter.sv`; Core reset-vector integration remains pending
-- Required software artifacts per build: coherent profile values, linker script, startup code, and image loader or boot configuration
+- Document type: cross-boundary execution-environment contract
+- Core authority: reset behavior, address/protocol boundary, and architectural fault conversion
+- Platform authority: future SoC contracts governed by the SoC/platform roadmap
+- Software authority: RV32I Software Authoring Contract and selected image artifacts

@@ -4,11 +4,13 @@
 
 **Execution environment:** [RV32I Execution-Environment Contract](../../Philosophy/RV32I_Execution_Environment_Contract.md)
 
+**Platform roadmap:** [RV32I SoC and Platform Roadmap](../../Roadmap/RV32I_SoC_and_Platform_Roadmap.md)
+
 **Governing architecture:** [RV32I Core Architecture](../../Philosophy/RV32I_Core_Architecture.md)
 
 **LSU contract:** [RV32I LSU Design Contract](../Execution/RV32I_LSU_Contract.md)
 
-**Core integration:** [RV32I Core Implementation](../../Roadmap/RV32I_Core_Implementation.md)
+**Core integration:** [RV32I Core Design Contract](../RV32I_Core_Design_Contract.md)
 
 ## 1. Purpose
 
@@ -20,13 +22,16 @@ The terms **shall**, **shall not**, and **may** denote a requirement, a prohibit
 
 The memory subsystem shall retain the following structure:
 
-```text
-core fetch -> LSU fetch path -> IMEM interface --+
-                                                  +-> profile-defined adapter/routing -> one or more backends
-core data  -> LSU data path  -> DMEM interface --+
+```mermaid
+flowchart LR
+    FETCH["Core fetch"] --> LSU_IF["LSU fetch path"] --> IMEM["IMEM interface"]
+    DATA["Core data"] --> LSU_DATA["LSU data path"] --> DMEM["DMEM interface"]
+    IMEM --> MAP["SoC/platform adapter and unified map"]
+    DMEM --> MAP
+    MAP --> BACKEND["One or more physical backends"]
 ```
 
-The IMEM and DMEM paths shall use separate instances of `rv32_mem_if`. Adapter functionality is required between each generic interface and any physical backend, including a simple synchronous RAM or FPGA BRAM. A profile may implement that functionality in separate adapter modules or in one combined adapter that routes or arbitrates both paths to shared physical storage.
+The IMEM and DMEM paths shall use separate instances of `rv32_mem_if` while carrying addresses from one unified architectural address space. This separation is a Core microarchitectural boundary, not architectural Harvard memory. Adapter functionality is required between each generic interface and any physical backend. A SoC may implement separate adapters or one combined adapter that routes both paths to shared physical storage.
 
 The LSU shall define ISA-level memory semantics. Adapters shall define mapping and physical access. A backend shall receive only local or backend-native transactions.
 
@@ -68,7 +73,7 @@ The requester shall not assume combinational response or fixed latency. An adapt
 
 ### 5.1 Address
 
-Both interfaces shall carry full 32-bit architectural byte addresses. The core and LSU shall not subtract a region base, truncate an address to backend width, or convert it to a word index.
+Both interfaces shall carry full 32-bit byte addresses in the same architectural address space. The core and LSU shall not subtract a region base, truncate an address to backend width, convert it to a word index, or maintain distinct software-visible IMEM and DMEM maps.
 
 ### 5.2 Writes
 
@@ -95,7 +100,7 @@ For every connected generic interface, the adapter layer shall:
 - complete and clean up a transaction without an additional core/LSU clear protocol; and
 - preserve the outstanding-transaction limit.
 
-Memory-region bases, sizes, local address widths, physical topology, and routing options may be elaboration-time parameters. Each concrete build profile shall resolve them coherently with its linker, startup, loader/boot path, and platform headers under the execution-environment contract. Current shared-RAM defaults are example configuration values rather than Core or LSU invariants. Changing profile values or selecting unified versus separate backends shall not change the core or LSU contract.
+Memory-region bases, sizes, permissions, local address widths, physical topology, and routing options belong to the SoC/platform and may be elaboration-time parameters. Generated linker/platform inputs and any discovery structure shall describe that same implementation to software. Current shared-RAM defaults are example values rather than Core or LSU invariants. Selecting unified or separate backends shall not change the unified architectural map or Core/LSU transaction contract.
 
 ### 6.2 IMEM-path adaptation
 
@@ -103,7 +108,7 @@ The IMEM adapter shall implement instruction-region mapping and read sequencing.
 
 ### 6.3 DMEM-path adaptation
 
-The DMEM adapter shall preserve LSU-generated write lanes and shall return raw 32-bit read data. It may route requests among RAM, MMIO, a cache, or an external bus, but shall not repeat load signedness, load extension, or store-width decoding.
+The DMEM adapter shall preserve LSU-generated write lanes and shall return raw 32-bit read data. It may route requests among RAM, MMIO, ROM where permitted, or an external bus, but shall not repeat load signedness, load extension, or store-width decoding. Caches are outside the baseline scope.
 
 ## 7. Sequencing Ownership
 
@@ -113,7 +118,7 @@ The LSU shall remain stateless. Each adapter may contain the state required for 
 
 ## 8. Error Boundary
 
-Adapter and backend failures shall be reported as `ready && err`. Errors are transaction-scoped and shall clear through normal request teardown.
+Adapter and backend failures, including unmapped, permission-invalid, and unsupported transactions, shall be reported as `ready && err`. Errors are transaction-scoped and shall clear through normal request teardown. LSU/Core converts the failed transaction into the applicable instruction, load, or store access-fault exception.
 
 LSU-local validation errors may complete at the core-facing LSU boundary without issuing an adapter transaction. Architectural trap generation and policy remain outside the generic memory interface.
 
@@ -130,4 +135,4 @@ Verification shall demonstrate that:
 - synchronous and delayed backends require no core-side timing change; and
 - replacing a backend or changing map parameters does not change core/LSU transaction semantics.
 
-This contract requires revision if the generic field meanings, request lifetime, completion semantics, lane convention, adapter requirement, Harvard path separation, or concurrency model changes. Backend choice, region parameters, and adapter-internal state do not require revision while these boundaries remain unchanged.
+This contract requires revision if the generic field meanings, request lifetime, completion semantics, lane convention, logical IMEM/DMEM boundary, unified architectural address model, or concurrency model changes. Backend choice, region parameters, and adapter-internal state do not require revision while these boundaries remain unchanged.

@@ -22,29 +22,29 @@ The semantic record shall identify at least:
 The shared record shall therefore include fields equivalent to:
 
 ```systemverilog
-csr_op_t    csr_op;
-logic [4:0] csr_uimm;
-pc_src_t    pc_src;
+csr_op_e          csr_op;
+logic [4:0]       csr_uimm;
+pc_source_e       pc_source;
 ```
 
-`inst_sem_t` shall not contain a semantic `legal` or `valid` field. The decoder shall instead expose `inst_trap_o`, serving the decoder `trap_o` role, with type `rv32_trap_pkg::trap_req_t`.
+`inst_semantics_t` shall not contain a semantic `legal` or `valid` field. The decoder shall instead expose `inst_trap_o`, serving the decoder `trap_o` role, with type `rv32_trap_pkg::trap_req_t`.
 
 The decoder shall not read the register file, access memory, update architectural state, or select a trap vector.
 
 ## 2. Encoding Trap Reporting
 
-For a normally decoded instruction, `inst_trap_o.valid` shall be clear and the semantic record shall carry the instruction's valid execution meaning.
+For a normally decoded instruction, `inst_trap_o.is_valid` shall be clear and the semantic record shall carry the instruction's valid execution meaning.
 
 For an illegal or unsupported encoding, the decoder shall report:
 
 ```text
-inst_trap_o.valid     = 1
-inst_trap_o.interrupt = 0
+inst_trap_o.is_valid     = 1
+inst_trap_o.is_interrupt = 0
 inst_trap_o.code      = EXC_ILLEGAL_INST
 inst_trap_o.tval      = inst_i
 ```
 
-The decoder shall assign benign defaults to every semantic field on all combinational paths. The core shall ignore the complete semantic record whenever `inst_trap_o.valid` is set.
+The decoder shall assign benign defaults to every semantic field on all combinational paths. The core shall ignore the complete semantic record whenever `inst_trap_o.is_valid` is set.
 
 The decoder owns illegal conditions fully determined by instruction bits, including unsupported major opcodes, reserved `funct3` or `funct7` combinations, unsupported extension encodings, reserved SYSTEM `funct3` values, unsupported FENCE.I encodings, and other structurally illegal forms.
 
@@ -131,17 +131,7 @@ The SYSTEM major opcode shall map `funct3` as follows:
 
 Structurally valid register and immediate CSR forms shall select CSR writeback, assert destination-register write intent, and select the sequential normal-PC source. The SYSTEM form shall select CSR writeback and the CSR/SYSTEM normal-PC source without destination-register write intent.
 
-The CSR/SYSTEM controller shall interpret the preserved SYSTEM immediate at minimum as follows:
-
-| `imm[11:0]` | Exact operation |
-| --- | --- |
-| `12'h000` | ECALL |
-| `12'h001` | EBREAK |
-| `12'h105` | WFI |
-| `12'h302` | MRET |
-| Other | Illegal-instruction trap |
-
-The CSR/SYSTEM controller also enforces the `rs1 == x0` and `rd == x0` constraints for these exact operations. ECALL and EBREAK shall produce their defined synchronous exceptions, WFI shall be a side-effect-free sequential no-op, and MRET shall produce `mepc` as its normal PC result. The main decoder shall not duplicate this exact-encoding policy.
+The [CSR/SYSTEM controller contract](../Execution/RV32I_CSR_SYSTEM_Design_Contract.md#6-exact-system-interpretation) owns the exact ECALL, EBREAK, WFI, MRET, malformed-encoding, and zero-register rules. The main decoder shall preserve the SYSTEM immediate and required register fields without duplicating that policy.
 
 ## 9. FENCE Classification
 
@@ -183,7 +173,7 @@ Decoder verification shall show that:
 ## Module Contracts
 
 - [Core architecture](../../Philosophy/RV32I_Core_Architecture.md)
-- [Core implementation](../../Roadmap/RV32I_Core_Implementation.md)
+- [Core design contract](../RV32I_Core_Design_Contract.md)
 - [ALU contract](../Execution/RV32I_ALU_Design_Contract.md)
 - [CTRL unit contract](../Execution/RV32I_CTRL_Design_Contract.md)
 - [LSU contract](../Execution/RV32I_LSU_Contract.md)
@@ -193,6 +183,6 @@ Decoder verification shall show that:
 ## Metadata
 
 - Document type: module contract
-- Authority: semantic interpretation of `rv32_instdec`
-- RTL authority: `rtl/core/ctrl/rv32_instdec.sv`, `rtl/core/type/rv32_inst_pkg.sv`
+- Authority: semantic interpretation of `rv32_inst_decoder`
+- RTL authority: `rtl/core/ctrl/rv32_inst_decoder.sv`, `rtl/core/type/rv32_inst_pkg.sv`
 - Verification authority: decoder unit tests and core integration tests

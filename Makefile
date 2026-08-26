@@ -14,7 +14,7 @@
 # ├── formal/
 # │   ├── top.sby
 # │   └── ...
-# ├── sw/
+# ├── software/
 # │   ├── start.S
 # │   ├── main.c
 # │   └── link.ld
@@ -51,15 +51,17 @@ TOP         ?=
 RTL_DIR     ?= rtl
 TB_DIR      ?= testbench
 FORMAL_DIR  ?= formal_verification
-SW_DIR      ?= simulation_wave
+SW_DIR      ?= software
 CONSTR_DIR  ?= constraints
 BUILD_DIR   ?= build
 
+WAVE_DIR    ?= simulation_wave
+
 SIM_BUILD   := $(BUILD_DIR)/sim/$(TOP)
-SW_BUILD    := $(BUILD_DIR)/simulation_wave
+SW_BUILD    := $(BUILD_DIR)/software
 SYNTH_BUILD := $(BUILD_DIR)/synth
 FORMAL_BUILD:= $(BUILD_DIR)/formal_verification
-WAVE_FILE   ?= $(abspath $(SW_DIR)/$(TOP).fst)
+WAVE_FILE   ?= $(abspath $(WAVE_DIR)/$(TOP).fst)
 SURFER      ?= surfer
 
 
@@ -115,7 +117,7 @@ OBJDUMP := $(RISCV_PREFIX)objdump
 READELF := $(RISCV_PREFIX)readelf
 NM      := $(RISCV_PREFIX)nm
 
-MARCH ?= rv32i
+MARCH ?= rv32i_zicsr
 MABI  ?= ilp32
 
 ARCH_FLAGS := \
@@ -214,6 +216,7 @@ help:
 		'  make formal-smoke Run smoke formal job' \
 		'  make update-files Refresh RTL and testbench SystemVerilog manifests' \
 		'  make check-files  Check whether SystemVerilog manifests are up to date' \
+		'  make source/vivado Stage RTL sources for Vivado' \
 		'  make firmware     Build ELF, BIN, HEX and disassembly' \
 		'  make disasm       Print firmware disassembly' \
 		'  make elf-info     Print ELF headers/sections/symbols' \
@@ -252,6 +255,12 @@ $(SYNTH_BUILD):
 	mkdir -p $@
 
 $(FORMAL_BUILD):
+	mkdir -p $@
+
+$(SW_DIR):
+	mkdir -p $@
+
+$(WAVE_DIR):
 	mkdir -p $@
 
 
@@ -342,9 +351,8 @@ test/cocotb: cocotb-build
 .PHONY: sim sim/cocotb
 sim: sim/cocotb
 
-sim/cocotb: cocotb-build
+	sim/cocotb: cocotb-build | $(WAVE_DIR)
 	@set -e; \
-	mkdir -p "$(SW_DIR)"; \
 	$(MAKE) \
 		-C $(SIM_BUILD) \
 		-f $(CURDIR)/Makefile.cocotb \
@@ -361,9 +369,9 @@ sim/cocotb: cocotb-build
 .PHONY: wave
 wave:
 	@set -e; \
-	wave_file="$$(ls -t "$(SW_DIR)"/*.fst 2>/dev/null | head -n 1)"; \
+	wave_file="$$(ls -t "$(WAVE_DIR)"/*.fst 2>/dev/null | head -n 1)"; \
 	if [ -z "$$wave_file" ]; then \
-		echo "No FST waveform found in $(SW_DIR)/"; \
+		echo "No FST waveform found in $(WAVE_DIR)/"; \
 		exit 1; \
 	fi; \
 	nohup $(SURFER) "$$wave_file" >/dev/null 2>&1 &
@@ -499,6 +507,17 @@ elf-info: $(ELF)
 #   $::env(SYNTH_BUILD)
 #
 # ==============================================================================
+
+.PHONY: source/vivado
+source/vivado:
+	@set -e; \
+	destination="$(BUILD_DIR)/vivado/$(RTL_DIR)"; \
+	rm -rf "$(BUILD_DIR)/vivado"; \
+	find "$(RTL_DIR)" -type f -print | while IFS= read -r source; do \
+		target="$$destination/$${source#$(RTL_DIR)/}"; \
+		mkdir -p "$$(dirname "$$target")"; \
+		sed '/^[[:space:]]*`default_nettype[[:space:]]/d' "$$source" > "$$target"; \
+	done
 
 .PHONY: synth
 synth: | $(SYNTH_BUILD)
